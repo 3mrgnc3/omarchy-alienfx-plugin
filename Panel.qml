@@ -44,7 +44,11 @@ Panel {
 
   property bool pickerOpen: false
   property bool saveOpen: false
+  // Keyboard cursor over the effect row. First key press only reveals the
+  // cursor rather than moving it, so a stray arrow key cannot change the
+  // lighting - the same behaviour as the power plugin's profile row.
   property bool cursorActive: false
+  property int cursorIndex: 0
 
   // ------------------------------------------------------- locally owned UI
   // Omarchy's controls are stateless by contract: Toggle expects the consumer
@@ -60,6 +64,7 @@ Panel {
   property bool uiZonesync: true
   property string uiEffect: "gradient"
   property string uiZone: "kbd"
+  property string uiProfile: ""
   property int uiBrightness: 26
 
   // Picker channels, also locally owned.
@@ -74,6 +79,11 @@ Panel {
   readonly property int settleMs: 900
   function touch() { root.localEditAt = Date.now(); settleTimer.restart() }
   function editing() { return (Date.now() - root.localEditAt) < root.settleMs }
+
+  // True while any slider is under the pointer. Reconciliation must never move
+  // a control the user is physically holding.
+  readonly property bool anyDragging: brightnessSlider.dragging
+    || redSlider.dragging || greenSlider.dragging || blueSlider.dragging
 
   readonly property bool themesync: uiThemesync
   readonly property bool zonesync: uiZonesync
@@ -178,10 +188,21 @@ Panel {
   function adoptFromState() {
     var s = root.st
     if (!s) return
+    // Belt and braces: a live drag owns its control outright, whatever the
+    // settling window thinks.
+    if (root.anyDragging) return
     root.uiThemesync = s.themesync === true
     root.uiZonesync = s.zonesync !== false
     root.uiEffect = s.effect ? String(s.effect) : "gradient"
     root.uiZone = s.selected_zone ? String(s.selected_zone) : "kbd"
+    // Only follow the reported profile when the user has not picked something
+    // else, and fall back to the first available so Load is never a no-op.
+    var reported = root.currentProfile !== "" ? root.currentProfile
+                 : (root.profileNames.length > 0 ? String(root.profileNames[0]) : "")
+    if (root.uiProfile === "" || root.uiProfile === reported
+        || root.profileNames.indexOf(root.uiProfile) < 0) {
+      root.uiProfile = reported
+    }
     if (s.brightness !== undefined) root.uiBrightness = s.brightness
     loadPickerFromZone(root.uiZone)
   }
@@ -240,13 +261,19 @@ Panel {
   // and drop rather than queue if the hardware is busy.
   function applyPickedColor(live) {
     var hex = Model.rgbToHex(root.pickR, root.pickG, root.pickB)
-    root.run(["set", "--zones", colorTargets(live), "--color", hex, "--fast"])
+    var args = ["set", "--zones", colorTargets(live), "--color", hex, "--fast"]
+    // An intermediate frame may be dropped if the hardware is busy; the value
+    // the user settles on may not, or saved state ends up behind the UI.
+    if (live) args.push("--drop-if-busy")
+    root.run(args)
   }
 
   function setBrightness(value, live) {
     root.uiBrightness = Model.clamp255(value)
-    root.run(["set", "--zones", live ? colorTargets(true) : "all",
-              "--brightness", String(root.uiBrightness), "--fast"])
+    var args = ["set", "--zones", live ? colorTargets(true) : "all",
+                "--brightness", String(root.uiBrightness), "--fast"]
+    if (live) args.push("--drop-if-busy")
+    root.run(args)
   }
 
   // Once the user has stopped, re-apply durably so the power button's colour
@@ -256,6 +283,28 @@ Panel {
     if (!root.cliResolved) return
     Quickshell.execDetached([root.cliPath, "commit"])
     refreshTimer.restart()
+  }
+
+  function moveCursor(delta) {
+    if (!root.cursorActive) { root.cursorActive = true; return }
+    var count = Model.EFFECT_ORDER.length
+    root.cursorIndex = Math.max(0, Math.min(count - 1, root.cursorIndex + delta))
+  }
+
+  function activateCursor() {
+    if (!root.cursorActive) return
+    var name = Model.EFFECT_ORDER[root.cursorIndex]
+    if (name) root.applyEffect(String(name))
+  }
+
+  // One path for changing the effect, so the mouse and the keyboard cannot
+  // drift apart.
+  function applyEffect(name) {
+    root.uiEffect = name
+    if (name !== "gradient") root.uiThemesync = false
+    root.cursorIndex = Math.max(0, Model.EFFECT_ORDER.indexOf(name))
+    root.touch()
+    root.run(["set", "--effect", name, "--fast"])
   }
 
   function zoneDotColor(zone) {
@@ -301,9 +350,12 @@ Panel {
     id: refreshTimer
     interval: 400
     repeat: false
-    // Never reconcile mid-interaction; adoptFromState is gated on editing()
-    // anyway, but re-reading during a drag is just wasted work.
-    onTriggered: if (!root.editing()) root.refresh()
+    // Re-reading mid-drag is wasted work, but giving up entirely would leave
+    // `st` stale forever - so keep waiting rather than dropping the refresh.
+    onTriggered: {
+      if (root.editing()) restart()
+      else root.refresh()
+    }
   }
 
   // Profile loads re-apply all four zones, so give the CLI time before reading
@@ -315,14 +367,16 @@ Panel {
     onTriggered: { root.localEditAt = 0; root.refresh() }
   }
 
-  // Fires once the user has been quiet. It only reconciles the controls with
-  // what the CLI reports - the durable write happens when the popup closes, so
-  // an idle user is never interrupted by a 2s NVRAM walk mid-session.
+  // Fires once the user has been quiet. It re-reads state rather than adopting
+  // the snapshot it already has: during a drag the refresh is deliberately
+  // suppressed, so `st` is stale by definition here, and adopting it would snap
+  // every control back to its pre-drag value. ingest() does the adopting once
+  // the fresh read lands, since editing() has expired by then.
   Timer {
     id: settleTimer
     interval: root.settleMs + 300
     repeat: false
-    onTriggered: root.adoptFromState()
+    onTriggered: root.refresh()
   }
 
   // Realtime-but-not-wasteful. A chassis write costs ~190ms (the controller's
@@ -365,6 +419,7 @@ Panel {
       // Re-resolve on open: setup may have completed since the last look.
       resolveCli()
       cursorActive = false
+      cursorIndex = Math.max(0, Model.EFFECT_ORDER.indexOf(root.uiEffect))
       saveOpen = false
       startStream()
     }
@@ -405,6 +460,17 @@ Panel {
       anchors.fill: parent
       onCloseRequested: root.close()
       onTabRequested: function (direction) { root.switchPanel(direction) }
+      onMoveRequested: function (dx, dy) {
+        // Vertical steps brightness, horizontal walks the effect row - the two
+        // things worth reaching without the mouse.
+        if (dy !== 0) {
+          root.touch()
+          root.setBrightness(Model.clamp255(root.uiBrightness - dy * 8), false)
+          return
+        }
+        if (dx !== 0) root.moveCursor(dx)
+      }
+      onActivateRequested: root.activateCursor()
 
       Column {
         id: column
@@ -743,6 +809,7 @@ Panel {
             spacing: Style.space(5)
 
             ChannelSlider {
+              id: redSlider
               width: parent.width
               label: "R"
               channel: root.pickR
@@ -753,6 +820,7 @@ Panel {
               }
             }
             ChannelSlider {
+              id: greenSlider
               width: parent.width
               label: "G"
               channel: root.pickG
@@ -763,6 +831,7 @@ Panel {
               }
             }
             ChannelSlider {
+              id: blueSlider
               width: parent.width
               label: "B"
               channel: root.pickB
@@ -791,13 +860,8 @@ Panel {
             width: parent.width
             options: Model.effectOptions()
             current: root.uiEffect
-            onPicked: function (value) {
-              root.uiEffect = value
-              // A manual effect means the theme is no longer driving.
-              if (value !== "gradient") root.uiThemesync = false
-              root.touch()
-              root.run(["set", "--effect", value, "--fast"])
-            }
+            cursorIndex: root.cursorActive ? root.cursorIndex : -1
+            onPicked: function (value) { root.applyEffect(value) }
           }
         }
 
@@ -825,8 +889,13 @@ Panel {
               width: parent.width - loadButton.width - saveButton.width - parent.spacing * 2
               showLabel: false
               options: Model.profileOptions(root.profileNames)
-              value: root.currentProfile !== "" ? root.currentProfile
-                   : (root.profileNames.length > 0 ? String(root.profileNames[0]) : "")
+              // Caller-owned, like every other control here. Dropdown assigns
+              // its own `value` imperatively on selection, which would destroy
+              // a binding to reported state outright - so the selection lives
+              // in uiProfile and is handed back through onChanged. This is the
+              // pattern Omarchy's own component gallery documents.
+              value: root.uiProfile
+              onChanged: function (v) { root.uiProfile = v }
               foreground: Color.popups.text
               background: Color.popups.background
               popupBorder: Color.popups.border
@@ -843,12 +912,12 @@ Panel {
               fontFamily: root.fontFamily
               bordered: true
               onClicked: {
-                if (profileDropdown.value === "") return
+                if (root.uiProfile === "") return
                 // A profile load is meant to overwrite the controls, so drop the
                 // settling window and adopt whatever comes back.
                 root.localEditAt = 0
                 settleTimer.stop()
-                Quickshell.execDetached([root.cliPath, "profile", "load", profileDropdown.value])
+                Quickshell.execDetached([root.cliPath, "profile", "load", root.uiProfile])
                 profileReload.restart()
               }
             }
@@ -866,7 +935,7 @@ Panel {
               onClicked: {
                 root.saveOpen = !root.saveOpen
                 if (root.saveOpen) {
-                  saveField.text = root.currentProfile !== "" ? root.currentProfile : "Default"
+                  saveField.text = root.uiProfile !== "" ? root.uiProfile : "Default"
                   saveField.forceActiveFocus()
                   saveField.selectAll()
                 }
@@ -924,6 +993,7 @@ Panel {
     property var options: []
     property string current: ""
     property bool showDots: false
+    property int cursorIndex: -1
     signal picked(string value)
 
     spacing: Style.space(6)
@@ -933,6 +1003,8 @@ Panel {
 
       delegate: Button {
         required property var modelData
+        required property int index
+        hasCursor: chipRow.cursorIndex === index
         text: String(modelData.label)
         // The dot previews the colour that zone is actually showing.
         iconText: chipRow.showDots ? "•" : ""
@@ -955,6 +1027,8 @@ Panel {
     id: channelRow
     property string label: ""
     property int channel: 0
+    // Surfaced so the panel can refuse to reconcile a control mid-drag.
+    readonly property bool dragging: slider.dragging
     signal channelMoved(int value)
     signal channelReleased(int value)
 

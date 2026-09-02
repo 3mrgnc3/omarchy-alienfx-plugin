@@ -69,17 +69,21 @@ def _apply(st, zones, args, save=True):
         return 0
 
     fast = getattr(args, "fast", False)
+    droppable = getattr(args, "drop_if_busy", False)
     try:
-        # A dropped drag frame is invisible - the next one supersedes it - but a
-        # deliberate action should wait its turn rather than vanish.
-        with lock.hardware_lock(wait=0.0 if fast else 3.0, drop_if_busy=fast):
+        # Only an intermediate frame may be dropped - the next one supersedes
+        # it. A final value must wait its turn, because dropping it would leave
+        # the saved state behind what the user actually set, and the UI would
+        # later reconcile back to the older number.
+        with lock.hardware_lock(wait=0.0 if droppable else 3.0,
+                                drop_if_busy=droppable):
             work = engine.apply(st, zones,
                                 persist=getattr(args, "persist", False),
                                 fast=fast)
             if save and not getattr(args, "no_save", False):
                 state.save_state(st)
     except lock.Busy:
-        if fast:
+        if droppable:
             return 0
         return _fail("hardware is busy; try again", 1)
 
@@ -530,6 +534,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="also write chassis colours to NVRAM so they survive a cold boot")
     common.add_argument("--fast", action="store_true",
                         help="skip power-button state programming (for live drags)")
+    common.add_argument("--drop-if-busy", dest="drop_if_busy", action="store_true",
+                        help="skip this change if the hardware is busy, instead of waiting")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
