@@ -224,23 +224,18 @@ def apply(st, zones=None, persist: bool = False, fast: bool = False) -> dict:
         kbd_fd = fds.get("kbd")
         if kbd_fd is None:
             return
-        # The teardown is only needed when leaving a firmware effect. Going from
-        # one painted frame to another - every frame of a colour drag - it is
-        # 84ms of pure overhead.
-        already_painting = st.get("kbd_mode") == "paint"
+        # Whether the teardown is needed is apiv5's business: it knows what this
+        # process last told the controller. It is deliberately not read from
+        # saved state - a fresh process must not assume what an earlier one did.
         if work["kbd_leds"] is not None:
-            apiv5.paint(kbd_fd, work["kbd_leds"], clean=not already_painting)
-            st["kbd_mode"] = "paint"
+            apiv5.paint(kbd_fd, work["kbd_leds"])
         elif work["kbd_effect"] is not None:
             spec = work["kbd_effect"]
             apiv5.firmware_effect(kbd_fd, spec["code"], spec["colours"],
                                   tempo=spec["tempo"])
-            st["kbd_mode"] = "effect"
         elif work["kbd_solid"] is not None:
             apiv5.solid(kbd_fd, work["kbd_solid"],
-                        count=work["kbd_count"] or apiv5.KBD_LED_COUNT,
-                        clean=not already_painting)
-            st["kbd_mode"] = "paint"
+                        count=work["kbd_count"] or apiv5.KBD_LED_COUNT)
 
     def guarded(fn):
         def run():

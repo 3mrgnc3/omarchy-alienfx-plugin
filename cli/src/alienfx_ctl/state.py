@@ -55,10 +55,6 @@ DEFAULT_STATE = {
     # Last colour written into the power button's NVRAM state blocks. Lets the
     # engine skip ~30 slow packets when nothing about that zone changed.
     "pbtn_programmed": "",
-    # Whether the keyboard is currently showing a painted frame or a firmware
-    # effect. Lets a repaint skip the 84ms teardown that only matters when
-    # leaving an effect.
-    "kbd_mode": "",
     "zones": {
         "kbd": {"color": "ff7800"},
         "tpd": {"color": "ff7800"},

@@ -118,6 +118,7 @@ def test_paint_emits_the_full_sequence(monkeypatch):
     """Reset, turn-on-set, frames, loop, update. Skipping turn-on-set is what
     used to leave the controller stuck dark."""
     rec = Recorder(); rec.install(monkeypatch, apiv5)
+    apiv5.forget_mode()
     apiv5.paint(4, [(0, 1, 2, 3)])
     heads = [buf[1] for _r, buf in rec.frames]
     assert 0x94 in heads, "no reset"
@@ -344,24 +345,64 @@ def test_power_button_charging_breathes_between_dim_and_full(monkeypatch):
     assert all(d < f for d, f in zip(dim, full) if f > 0), "dim end must be dimmer"
 
 
-def test_paint_can_skip_the_teardown(monkeypatch):
-    """clean_switch costs ~84ms and only matters when leaving a firmware
-    effect. Every frame of a colour drag would otherwise pay for nothing."""
+def test_the_first_paint_in_a_process_always_resets(monkeypatch):
+    """Nothing here knows what the controller was last told to do, so the first
+    paint must do the full sequence. This is the bug that made blocks of keys
+    intermittently fail to update: the mode was persisted to disk, so a one-shot
+    invocation read "paint" from an earlier process and skipped the reset on a
+    freshly opened descriptor."""
     rec = Recorder(); rec.install(monkeypatch, apiv5)
-    apiv5.paint(4, [(0, 1, 2, 3)], clean=False)
+    apiv5.forget_mode()
+    apiv5.paint(4, [(0, 1, 2, 3)])
     heads = [buf[1] for _r, buf in rec.frames]
-    # No disable frame and no reset: straight to turn-on-set.
-    assert not any(buf[1] == 0x80 and buf[2] == 0x01 and buf[3] == 0xFE for _r, buf in rec.frames)
-    assert 0x94 not in heads
+    assert 0x94 in heads, "no reset on the first paint of a process"
+
+
+def test_a_second_paint_in_the_same_process_skips_the_teardown(monkeypatch):
+    """Between two painted frames the teardown is 84ms of nothing, which is
+    what makes a colour drag affordable."""
+    rec = Recorder(); rec.install(monkeypatch, apiv5)
+    apiv5.forget_mode()
+    apiv5.paint(4, [(0, 1, 2, 3)])
+    rec.frames.clear()
+    apiv5.paint(4, [(0, 4, 5, 6)])
+    heads = [buf[1] for _r, buf in rec.frames]
+    assert 0x94 not in heads, "reset repeated between two painted frames"
     assert heads[0] == 0x83, "must still turn the LEDs on"
     assert 0x8C in heads and heads[-1] == 0x8B
 
 
-def test_paint_with_teardown_still_resets(monkeypatch):
+def test_a_paint_after_a_firmware_effect_resets_again(monkeypatch):
+    """An effect is running in firmware; a painted frame has to halt it."""
     rec = Recorder(); rec.install(monkeypatch, apiv5)
-    apiv5.paint(4, [(0, 1, 2, 3)], clean=True)
-    heads = [buf[1] for _r, buf in rec.frames]
-    assert 0x94 in heads, "coming from an effect requires the reset"
+    apiv5.forget_mode()
+    apiv5.paint(4, [(0, 1, 2, 3)])
+    apiv5.firmware_effect(4, apiv5.EFFECT_WAVE, (255, 0, 0))
+    rec.frames.clear()
+    apiv5.paint(4, [(0, 1, 2, 3)])
+    assert 0x94 in [buf[1] for _r, buf in rec.frames], "did not halt the effect"
+
+
+def test_the_mode_is_never_read_from_saved_state(config_root):
+    """The regression guard. Saved state must not be able to tell a fresh
+    process that a paint is already established."""
+    from alienfx_ctl import state
+    saved = state.load_state()
+    assert "kbd_mode" not in saved
+    state.save_state(saved)
+    import json
+    on_disk = json.load(open(state.state_path(), encoding="utf-8"))
+    assert "kbd_mode" not in on_disk
+
+
+def test_forget_mode_forces_a_reset(monkeypatch):
+    rec = Recorder(); rec.install(monkeypatch, apiv5)
+    apiv5.forget_mode()
+    apiv5.paint(4, [(0, 1, 2, 3)])
+    apiv5.forget_mode()
+    rec.frames.clear()
+    apiv5.paint(4, [(0, 1, 2, 3)])
+    assert 0x94 in [buf[1] for _r, buf in rec.frames]
 
 
 def test_keyboard_pacing_is_smaller_than_the_chassis():

@@ -44,6 +44,28 @@ _LEDS_PER_PACKET = 15
 # The command *sequence* is likewise not shortened beyond the conditional
 # clean_switch: a partial APIv5 sequence leaves the controller dark until a
 # reboot.
+#: What the controller is currently showing, tracked per process.
+#:
+#: This must NOT be persisted. The archived implementation kept it as a module
+#: global initialised to None, which means every fresh process does the full
+#: reset sequence on its first paint and only later paints in the *same* process
+#: skip the teardown. Persisting it to disk instead - which is what this did for
+#: a while - let a one-shot invocation (the theme hook, `restore`, `commit`) read
+#: "paint" from some earlier process and skip the reset on a freshly opened
+#: descriptor. That is how blocks of keys intermittently failed to update.
+_last_mode = None
+
+
+def current_mode():
+    return _last_mode
+
+
+def forget_mode() -> None:
+    """Force the next paint to do the full sequence."""
+    global _last_mode
+    _last_mode = None
+
+
 _RESET_SETTLE = 0.05
 _STEP_SETTLE = 0.01
 _FRAME_SETTLE = 0.002
@@ -143,25 +165,28 @@ def _commit(fd: int) -> None:
     time.sleep(_STEP_SETTLE)
 
 
-def paint(fd: int, leds, brightness: int = 0xFF, clean: bool = True) -> None:
+def paint(fd: int, leds, brightness: int = 0xFF) -> None:
     """Paint an explicit set of LEDs as one complete, committed frame.
 
-    ``clean`` runs the teardown that stops a firmware effect before painting.
-    It is required when coming from an effect, and pure overhead when the
-    controller is already showing a painted frame - it costs ~84ms, which is a
-    third of a repaint, so a colour drag skips it.
+    Runs the teardown that halts a firmware effect unless this process has
+    already established a painted frame on this controller. Skipping it between
+    two painted frames saves ~84ms and is what the archived implementation did;
+    skipping it on a process's *first* paint is not safe, because nothing here
+    knows what the controller was last told to do.
     """
-    if clean:
+    global _last_mode
+    if _last_mode != "paint":
         clean_switch(fd)
     _turn_on_set(fd, brightness)
     _frames(fd, leds)
     _commit(fd)
     update(fd)
+    _last_mode = "paint"
 
 
-def solid(fd: int, rgb, count: int = KBD_LED_COUNT, clean: bool = True) -> None:
+def solid(fd: int, rgb, count: int = KBD_LED_COUNT) -> None:
     red, green, blue = (max(0, min(255, int(channel))) for channel in rgb)
-    paint(fd, [(i, red, green, blue) for i in range(count)], clean=clean)
+    paint(fd, [(i, red, green, blue) for i in range(count)])
 
 
 def off(fd: int, count: int = KBD_LED_COUNT) -> None:
@@ -206,7 +231,11 @@ def firmware_effect(fd: int, effect: int, colours, tempo: int = 60) -> None:
     # the firmware reads the slot count from the field above.
     payload += [0x00, 0x00, 0x00] * (EFFECT_MAX_COLOURS - len(triplets))
 
+    global _last_mode
     reset(fd)
     kbd_send(fd, payload)
     time.sleep(_STEP_SETTLE)
     update(fd)
+    # A firmware effect is now running, so the next painted frame must tear it
+    # down first.
+    _last_mode = "firmware-effect"
