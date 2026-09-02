@@ -30,6 +30,9 @@ Panel {
   manageIpc: false
 
   // ------------------------------------------------------------ state mirror
+  // What the CLI last reported. Authoritative for the hardware, and for things
+  // the user cannot edit here (profiles, theme name, device access) - but NOT
+  // for rendering the controls. See the ui* block below.
   property var st: ({})
   property var profileNames: []
   property string currentProfile: ""
@@ -43,19 +46,42 @@ Panel {
   property bool saveOpen: false
   property bool cursorActive: false
 
-  // Picker channels are held locally rather than read straight from `st` so a
-  // state refresh landing mid-drag cannot yank the slider from under the user.
+  // ------------------------------------------------------- locally owned UI
+  // Omarchy's controls are stateless by contract: Toggle expects the consumer
+  // to flip `checked` in response to clicked(), and PanelSlider resets its knob
+  // to `value` the moment a drag ends. Binding either of them to state that
+  // only arrives after a process round-trip makes the control revert under the
+  // user's finger and then jump ~300ms later - which reads as "the first click
+  // did nothing".
+  //
+  // So these properties are what the controls bind to, and they change the
+  // instant the user acts. The CLI is told afterwards.
+  property bool uiThemesync: false
+  property bool uiZonesync: true
+  property string uiEffect: "gradient"
+  property string uiZone: "kbd"
+  property int uiBrightness: 26
+
+  // Picker channels, also locally owned.
   property int pickR: 255
   property int pickG: 120
   property int pickB: 0
 
-  readonly property bool themesync: st && st.themesync === true
-  readonly property bool zonesync: !st || st.zonesync !== false
-  readonly property string effect: (st && st.effect) ? String(st.effect) : "gradient"
-  readonly property string selectedZone: (st && st.selected_zone) ? String(st.selected_zone) : "kbd"
-  readonly property int brightness: (st && st.brightness !== undefined) ? st.brightness : 26
+  // While the user is driving, an in-flight state read must not overwrite what
+  // they just set. Any local edit marks a settling window; reconciliation waits
+  // for quiet.
+  property double localEditAt: 0
+  readonly property int settleMs: 900
+  function touch() { root.localEditAt = Date.now(); settleTimer.restart() }
+  function editing() { return (Date.now() - root.localEditAt) < root.settleMs }
 
-  // Theme-derived chrome. Falls back to the Color singleton when the widget is
+  readonly property bool themesync: uiThemesync
+  readonly property bool zonesync: uiZonesync
+  readonly property string effect: uiEffect
+  readonly property string selectedZone: uiZone
+  readonly property int brightness: uiBrightness
+
+  // Theme-derived chrome.  // Theme-derived chrome. Falls back to the Color singleton when the widget is
   // rendered outside a bar host.
   readonly property color fg: root.bar ? root.bar.foreground : Color.foreground
   readonly property string fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
@@ -106,6 +132,7 @@ Panel {
       root.cliPath = found
       root.cliResolved = true
       root.refresh()
+      if (root.opened) root.startStream()
     } else {
       root.cliResolved = false
       root.loaded = false
@@ -134,6 +161,8 @@ Panel {
     // panel; a transient failure should not look like a broken plugin.
     if (!parsed) return
     root.st = parsed
+
+    // Always adopt what the user cannot edit from here.
     root.profileNames = parsed.profiles || []
     root.currentProfile = parsed.current_profile || ""
     root.themeName = parsed.theme || ""
@@ -141,39 +170,106 @@ Panel {
     root.devicesOk = parsed.devices_ok !== false
     root.loaded = true
     root.errorText = ""
-    syncPickerFromState()
+
+    // Adopt control values only once the user has stopped touching them.
+    if (!root.editing()) adoptFromState()
   }
 
-  function syncPickerFromState() {
-    var rgb = Model.hexToRgb(Model.zoneHex(root.st, root.selectedZone))
+  function adoptFromState() {
+    var s = root.st
+    if (!s) return
+    root.uiThemesync = s.themesync === true
+    root.uiZonesync = s.zonesync !== false
+    root.uiEffect = s.effect ? String(s.effect) : "gradient"
+    root.uiZone = s.selected_zone ? String(s.selected_zone) : "kbd"
+    if (s.brightness !== undefined) root.uiBrightness = s.brightness
+    loadPickerFromZone(root.uiZone)
+  }
+
+  function loadPickerFromZone(zone) {
+    var rgb = Model.hexToRgb(Model.zoneHex(root.st, zone))
     root.pickR = rgb.r
     root.pickG = rgb.g
     root.pickB = rgb.b
   }
 
-  // Fire-and-forget: using execDetached rather than a single Process means
-  // rapid changes during a drag never queue up behind one another.
+  property bool streamReady: false
+
+  function startStream() {
+    if (!root.cliResolved || streamProc.running) return
+    streamProc.running = true
+  }
+
+  function stopStream() {
+    if (!streamProc.running) return
+    streamProc.write("quit\n")
+    streamProc.running = false
+    root.streamReady = false
+  }
+
+  // Route a command to the hardware.
+  //
+  // While the popup is open a single `alienfx-ctl stream` process holds the
+  // device descriptors, so a change costs ~107ms instead of ~294ms - spawning
+  // an interpreter and reopening the chassis node per frame was most of the
+  // latency. Anything that cannot go down the stream falls back to a one-shot.
   function run(args) {
+    if (root.streamReady && streamProc.running && Model.streamSafe(args)) {
+      streamProc.write(args.join(" ") + "\n")
+      refreshTimer.restart()
+      return
+    }
     Quickshell.execDetached([root.cliPath].concat(args))
     refreshTimer.restart()
   }
 
   // `live` marks an intermediate drag frame: it skips the slow power-button
   // NVRAM programming and drops rather than queues if the hardware is busy.
-  function applyPickedColor(live) {
-    var hex = Model.rgbToHex(root.pickR, root.pickG, root.pickB)
-    var args = ["set", "--zones", root.zonesync ? "all" : root.selectedZone, "--color", hex]
-    if (live) args.push("--fast")
-    run(args)
+  // Which zones a colour change should drive.
+  //
+  // While the user is dragging and zones are synced, only the keyboard is
+  // written: its ioctl is ~2ms per packet against the chassis's ~63ms, so
+  // including the chassis every frame roughly halves the frame rate for the
+  // sake of three small lights. The chassis catches up on release.
+  function colorTargets(live) {
+    if (!root.uiZonesync) return root.uiZone
+    return live ? "kbd" : "all"
   }
 
-  function setBrightness(value) {
-    run(["set", "--zones", "all", "--brightness", String(Model.clamp255(value))])
+  // `live` marks an intermediate frame: skip the power button's ~2s NVRAM walk,
+  // and drop rather than queue if the hardware is busy.
+  function applyPickedColor(live) {
+    var hex = Model.rgbToHex(root.pickR, root.pickG, root.pickB)
+    root.run(["set", "--zones", colorTargets(live), "--color", hex, "--fast"])
+  }
+
+  function setBrightness(value, live) {
+    root.uiBrightness = Model.clamp255(value)
+    root.run(["set", "--zones", live ? colorTargets(true) : "all",
+              "--brightness", String(root.uiBrightness), "--fast"])
+  }
+
+  // Once the user has stopped, re-apply durably so the power button's colour
+  // survives a power transition. This is the only path that pays the ~2s NVRAM
+  // cost, and it never runs while anything is being dragged.
+  function commitDurable() {
+    if (!root.cliResolved) return
+    Quickshell.execDetached([root.cliPath, "commit"])
+    refreshTimer.restart()
   }
 
   function zoneDotColor(zone) {
     var rgb = Model.hexToRgb(Model.zoneHex(root.st, zone))
     return Qt.rgba(rgb.r / 255, rgb.g / 255, rgb.b / 255, 1)
+  }
+
+  Process {
+    id: streamProc
+    command: [root.cliPath, "stream"]
+    stdinEnabled: true
+    running: false
+    onStarted: root.streamReady = true
+    onExited: root.streamReady = false
   }
 
   Process {
@@ -203,9 +299,30 @@ Panel {
   // updates costs one state read rather than one per frame.
   Timer {
     id: refreshTimer
-    interval: 260
+    interval: 400
     repeat: false
-    onTriggered: root.refresh()
+    // Never reconcile mid-interaction; adoptFromState is gated on editing()
+    // anyway, but re-reading during a drag is just wasted work.
+    onTriggered: if (!root.editing()) root.refresh()
+  }
+
+  // Profile loads re-apply all four zones, so give the CLI time before reading
+  // the result back and adopting it into the controls.
+  Timer {
+    id: profileReload
+    interval: 700
+    repeat: false
+    onTriggered: { root.localEditAt = 0; root.refresh() }
+  }
+
+  // Fires once the user has been quiet. It only reconciles the controls with
+  // what the CLI reports - the durable write happens when the popup closes, so
+  // an idle user is never interrupted by a 2s NVRAM walk mid-session.
+  Timer {
+    id: settleTimer
+    interval: root.settleMs + 300
+    repeat: false
+    onTriggered: root.adoptFromState()
   }
 
   // Realtime-but-not-wasteful. A chassis write costs ~190ms (the controller's
@@ -224,7 +341,7 @@ Panel {
     interval: 160
     repeat: false
     property int pending: 0
-    onTriggered: root.setBrightness(pending)
+    onTriggered: root.setBrightness(pending, true)
   }
 
   IpcHandler {
@@ -236,11 +353,20 @@ Panel {
   }
 
   onOpenedChanged: {
+    if (!opened) {
+      // Closing is the settle point. Stop the stream first so the durable
+      // write is not queued behind it, then make the last state permanent -
+      // this is the only place that pays the power button's ~2s NVRAM cost.
+      settleTimer.stop()
+      root.stopStream()
+      if (root.loaded) root.commitDurable()
+    }
     if (opened) {
       // Re-resolve on open: setup may have completed since the last look.
       resolveCli()
       cursorActive = false
       saveOpen = false
+      startStream()
     }
   }
 
@@ -432,11 +558,16 @@ Panel {
           width: parent.width
           label: Model.ICON.palette + "  ThemeSync"
           description: "Blend a diagonal gradient from the active Omarchy theme across every zone."
-          checked: root.themesync
+          checked: root.uiThemesync
           foreground: root.fg
           accent: Color.accent
           fontFamily: root.fontFamily
-          onClicked: root.run(["themesync", root.themesync ? "off" : "on"])
+          onClicked: {
+            root.uiThemesync = !root.uiThemesync
+            if (root.uiThemesync) root.uiEffect = "gradient"
+            root.touch()
+            root.run(["themesync", root.uiThemesync ? "on" : "off"])
+          }
         }
 
         // -------------------------------------------------- brightness
@@ -475,14 +606,20 @@ Panel {
             maximum: 255
             step: 1
             integer: true
-            value: root.brightness
+            // Bound to locally-owned state: PanelSlider resets liveValue to
+            // `value` on release, so `value` has to already hold the new
+            // number or the knob visibly jumps back.
+            value: root.uiBrightness
             onMoved: function (v) {
-              brightnessDebounce.pending = v
+              root.uiBrightness = Math.round(v)
+              root.touch()
+              brightnessDebounce.pending = Math.round(v)
               brightnessDebounce.restart()
             }
             onReleased: function (v) {
               brightnessDebounce.stop()
-              root.setBrightness(v)
+              root.touch()
+              root.setBrightness(v, false)
             }
           }
         }
@@ -498,11 +635,15 @@ Panel {
           width: parent.width
           label: (root.zonesync ? Model.ICON.link : Model.ICON.unlink) + "  ZoneSync"
           description: "Change every zone together. Turn off to control each zone on its own."
-          checked: root.zonesync
+          checked: root.uiZonesync
           foreground: root.fg
           accent: Color.accent
           fontFamily: root.fontFamily
-          onClicked: root.run(["zonesync", root.zonesync ? "off" : "on"])
+          onClicked: {
+            root.uiZonesync = !root.uiZonesync
+            root.touch()
+            root.run(["zonesync", root.uiZonesync ? "on" : "off"])
+          }
         }
 
         // -------------------------------------------------- zone selector
@@ -519,11 +660,14 @@ Panel {
 
           ChipRow {
             width: parent.width
-            options: Model.zoneOptions(true)
-            current: root.selectedZone
+            options: Model.zoneOptions(false)
+            current: root.uiZone
             showDots: true
             onPicked: function (value) {
-              root.run(["set", "--select", value])
+              root.uiZone = value
+              root.loadPickerFromZone(value)
+              root.touch()
+              root.run(["set", "--select", value, "--fast"])
             }
           }
         }
@@ -602,27 +746,30 @@ Panel {
               width: parent.width
               label: "R"
               channel: root.pickR
-              onChannelMoved: function (v) { root.pickR = v; pickerDebounce.restart() }
+              onChannelMoved: function (v) { root.pickR = v; root.touch(); pickerDebounce.restart() }
               onChannelReleased: function (v) {
-                root.pickR = v; pickerDebounce.stop(); root.applyPickedColor(false)
+                root.pickR = v; root.touch()
+                pickerDebounce.stop(); root.applyPickedColor(false)
               }
             }
             ChannelSlider {
               width: parent.width
               label: "G"
               channel: root.pickG
-              onChannelMoved: function (v) { root.pickG = v; pickerDebounce.restart() }
+              onChannelMoved: function (v) { root.pickG = v; root.touch(); pickerDebounce.restart() }
               onChannelReleased: function (v) {
-                root.pickG = v; pickerDebounce.stop(); root.applyPickedColor(false)
+                root.pickG = v; root.touch()
+                pickerDebounce.stop(); root.applyPickedColor(false)
               }
             }
             ChannelSlider {
               width: parent.width
               label: "B"
               channel: root.pickB
-              onChannelMoved: function (v) { root.pickB = v; pickerDebounce.restart() }
+              onChannelMoved: function (v) { root.pickB = v; root.touch(); pickerDebounce.restart() }
               onChannelReleased: function (v) {
-                root.pickB = v; pickerDebounce.stop(); root.applyPickedColor(false)
+                root.pickB = v; root.touch()
+                pickerDebounce.stop(); root.applyPickedColor(false)
               }
             }
           }
@@ -643,8 +790,14 @@ Panel {
           ChipRow {
             width: parent.width
             options: Model.effectOptions()
-            current: root.effect
-            onPicked: function (value) { root.run(["set", "--effect", value]) }
+            current: root.uiEffect
+            onPicked: function (value) {
+              root.uiEffect = value
+              // A manual effect means the theme is no longer driving.
+              if (value !== "gradient") root.uiThemesync = false
+              root.touch()
+              root.run(["set", "--effect", value, "--fast"])
+            }
           }
         }
 
@@ -690,7 +843,13 @@ Panel {
               fontFamily: root.fontFamily
               bordered: true
               onClicked: {
-                if (profileDropdown.value !== "") root.run(["profile", "load", profileDropdown.value])
+                if (profileDropdown.value === "") return
+                // A profile load is meant to overwrite the controls, so drop the
+                // settling window and adopt whatever comes back.
+                root.localEditAt = 0
+                settleTimer.stop()
+                Quickshell.execDetached([root.cliPath, "profile", "load", profileDropdown.value])
+                profileReload.restart()
               }
             }
 

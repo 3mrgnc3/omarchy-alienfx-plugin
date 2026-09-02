@@ -115,6 +115,17 @@ function profileOptions(names) {
 
 // Parse `alienfx-ctl state --json`. Returns null on anything unparseable so
 // the caller can keep showing the last good state instead of blanking out.
+// Stream commands are newline-delimited and space-separated, so only simple
+// tokens can travel that way. Anything with whitespace or a quote goes out as a
+// one-shot argv instead, where the shell is never involved.
+function streamSafe(args) {
+  if (!Array.isArray(args) || args.length === 0) return false;
+  for (var i = 0; i < args.length; i++) {
+    if (!/^[A-Za-z0-9_,.:%=@#-]+$/.test(String(args[i]))) return false;
+  }
+  return true;
+}
+
 function parseState(text) {
   if (!text) return null;
   try {
@@ -132,6 +143,7 @@ if (typeof module !== "undefined") {
     clamp255: clamp255, hexToRgb: hexToRgb, rgbToHex: rgbToHex,
     zoneHex: zoneHex, brightnessPercent: brightnessPercent,
     zoneOptions: zoneOptions, effectOptions: effectOptions,
-    profileOptions: profileOptions, parseState: parseState
+    profileOptions: profileOptions, parseState: parseState,
+    streamSafe: streamSafe
   };
 }

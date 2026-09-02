@@ -134,6 +134,40 @@ def needs_elc(zones) -> bool:
     return bool(set(zones) & set(ELC_ZONE_NAMES))
 
 
+# ---------------------------------------------------------------- descriptor cache
+#
+# One-shot invocations open and close their descriptors, which is right for a
+# CLI. Stream mode (see cli.stream) keeps one process alive for the lifetime of
+# the popup and applies many changes through it, and there the open cost is pure
+# waste per frame - opening the chassis node alone measures ~52ms. Enabling the
+# cache makes open_fds hand back the descriptors it already holds.
+
+_cache: dict = {}
+_cache_enabled = False
+
+
+def enable_cache() -> None:
+    """Hold descriptors open across calls until close_cache()."""
+    global _cache_enabled
+    _cache_enabled = True
+
+
+def close_cache() -> None:
+    """Release every held descriptor and go back to open-per-call."""
+    global _cache_enabled
+    _cache_enabled = False
+    for fd in _cache.values():
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    _cache.clear()
+
+
+def cache_enabled() -> bool:
+    return _cache_enabled
+
+
 def open_fds(zones) -> dict:
     """Open exactly the controllers the requested zones need, atomically.
 
@@ -145,6 +179,21 @@ def open_fds(zones) -> dict:
     unknown = wanted - set(ZONES)
     if unknown:
         raise DeviceError(f"unknown zone(s): {', '.join(sorted(unknown))}")
+
+    if _cache_enabled:
+        # Open whatever is missing, then hand back only what was asked for. A
+        # failure here leaves the cache holding whatever already worked, which
+        # close_cache will release.
+        if needs_kbd(wanted) and "kbd" not in _cache:
+            _cache["kbd"] = _open_verified(KBD_VID, KBD_PID, "keyboard controller")
+        if needs_elc(wanted) and "elc" not in _cache:
+            _cache["elc"] = _open_verified(ELC_VID, ELC_PID, "AW-ELC chassis controller")
+        held = {}
+        if needs_kbd(wanted):
+            held["kbd"] = _cache["kbd"]
+        if needs_elc(wanted):
+            held["elc"] = _cache["elc"]
+        return held
 
     fds: dict = {}
     try:
@@ -159,6 +208,11 @@ def open_fds(zones) -> dict:
 
 
 def close_fds(fds: dict) -> None:
+    """Close descriptors from open_fds. A no-op for cached ones - the cache owns
+    those, and closing them here would break the next call."""
+    if _cache_enabled:
+        fds.clear()
+        return
     for fd in fds.values():
         try:
             os.close(fd)

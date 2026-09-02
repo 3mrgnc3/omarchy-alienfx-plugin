@@ -115,3 +115,72 @@ def test_close_fds_survives_a_bad_descriptor(monkeypatch):
     fds = {"kbd": 7}
     device.close_fds(fds)  # must not raise
     assert fds == {}
+
+
+def first_fd_value(opens):
+    """The value fake_open returned on its first (and only) call."""
+    return 200 + 1
+
+
+# ------------------------------------------------------- descriptor cache
+
+def test_cache_reuses_one_descriptor_across_calls(monkeypatch):
+    """Stream mode applies many changes through one process. Reopening the
+    chassis node each time costs ~52ms, which is most of a frame."""
+    opens = []
+
+    def fake_open(vid, pid, label):
+        opens.append(label)
+        return 200 + len(opens)
+
+    monkeypatch.setattr(device, "_open_verified", fake_open)
+    monkeypatch.setattr(os, "close", lambda fd: None)
+    device.enable_cache()
+    try:
+        first = device.open_fds(["kbd"])
+        device.close_fds(first)
+        second = device.open_fds(["kbd"])
+        assert len(opens) == 1, "the descriptor was reopened"
+        assert second["kbd"] == first_fd_value(opens)
+    finally:
+        device.close_cache()
+
+
+def test_close_fds_is_a_noop_while_cached(monkeypatch):
+    """Closing a cached descriptor would break every later call."""
+    closed = []
+    monkeypatch.setattr(device, "_open_verified", lambda v, p, l: 300)
+    monkeypatch.setattr(os, "close", lambda fd: closed.append(fd))
+    device.enable_cache()
+    try:
+        fds = device.open_fds(["kbd"])
+        device.close_fds(fds)
+        assert closed == [], "close_fds must not close cached descriptors"
+        assert fds == {}, "the caller's dict is still cleared"
+    finally:
+        device.close_cache()
+    assert 300 in closed, "close_cache must release it"
+
+
+def test_cache_opens_only_the_controllers_asked_for(monkeypatch):
+    labels = []
+    monkeypatch.setattr(device, "_open_verified",
+                        lambda v, p, l: (labels.append(l), 400 + len(labels))[1])
+    monkeypatch.setattr(os, "close", lambda fd: None)
+    device.enable_cache()
+    try:
+        assert list(device.open_fds(["kbd"])) == ["kbd"]
+        assert len(labels) == 1
+        # Asking for a chassis zone now opens the second controller, and only it.
+        assert sorted(device.open_fds(["kbd", "logo"])) == ["elc", "kbd"]
+        assert len(labels) == 2
+    finally:
+        device.close_cache()
+
+
+def test_cache_disabled_by_default_and_restored_after_close():
+    assert device.cache_enabled() is False
+    device.enable_cache()
+    assert device.cache_enabled() is True
+    device.close_cache()
+    assert device.cache_enabled() is False

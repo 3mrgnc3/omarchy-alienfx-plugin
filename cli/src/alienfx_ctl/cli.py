@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 
 from . import __version__, apiv5, colors, device, engine, gradient, keymap, lock, palette, state
@@ -313,6 +314,73 @@ def cmd_zonesync(args) -> int:
     return _apply(st, list(device.ZONES), args)
 
 
+def cmd_stream(args) -> int:
+    """Apply many changes through one long-lived process.
+
+    Reads newline-delimited commands from stdin, each one exactly the arguments
+    you would pass on the command line, and applies them against descriptors
+    that stay open. That removes the two costs that dominate a one-shot
+    invocation - ~50ms of interpreter and imports, and ~52ms to open the chassis
+    node - which is the difference between a colour drag that steps and one that
+    follows the pointer.
+
+    The popup starts this when it opens and closes stdin when it closes, so
+    nothing is left running in the background.
+
+    Line protocol: a command's own output (if it has any) is written first, then
+    a single status line terminates the response - `ok`, or `err <message>`. A
+    reader should consume lines until that terminator rather than assuming one
+    line per command.
+    """
+    parser = build_parser()
+    device.enable_cache()
+    try:
+        while True:
+            line = sys.stdin.readline()
+            if not line:
+                break  # stdin closed: the popup went away
+            text = line.strip()
+            if not text or text.startswith("#"):
+                continue
+            if text in ("quit", "exit"):
+                break
+            try:
+                argv = shlex.split(text)
+            except ValueError as exc:
+                print(f"err bad quoting: {exc}", flush=True)
+                continue
+            # A streamed command must never be able to nest another stream.
+            if argv and argv[0] == "stream":
+                print("err stream cannot nest", flush=True)
+                continue
+            try:
+                namespace = parser.parse_args(argv)
+                code = namespace.func(namespace)
+                print("ok" if code == 0 else f"err exit {code}", flush=True)
+            except SystemExit:
+                # argparse exits on a bad command; in a stream that must not
+                # take the whole process down with it.
+                print("err invalid command", flush=True)
+            except Exception as exc:
+                print(f"err {exc}", flush=True)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        device.close_cache()
+    return 0
+
+
+def cmd_commit(args) -> int:
+    """Re-apply current state durably, programming what the fast path skipped.
+
+    Interactive changes all go out --fast so nothing the user is driving pays
+    for the power button's ~2s NVRAM walk. This is what the UI calls once the
+    user has settled, so that colour still survives a power transition.
+    """
+    st = state.load_state()
+    return _apply(st, list(device.ZONES), args)
+
+
 def cmd_restore(args) -> int:
     """Re-apply live state. Used by the systemd unit at login and after resume."""
     st = state.load_state()
@@ -518,6 +586,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("zonesync", parents=[common], help="control all zones together or individually")
     p.add_argument("value", help="on or off")
     p.set_defaults(func=cmd_zonesync)
+
+    p = sub.add_parser("stream", parents=[common],
+                       help="read commands from stdin with the devices held open")
+    p.set_defaults(func=cmd_stream)
+
+    p = sub.add_parser("commit", parents=[common],
+                       help="re-apply state durably (programs power-button NVRAM)")
+    p.set_defaults(func=cmd_commit)
 
     p = sub.add_parser("restore", parents=[common], help="re-apply saved state (login/resume)")
     p.add_argument("--tolerant", action="store_true",

@@ -27,6 +27,17 @@ KBD_LED_COUNT = 200
 #: is 63 bytes, so 15 LEDs is the most that fits in one packet.
 _LEDS_PER_PACKET = 15
 
+# Pacing. Unlike the chassis, this controller is fast: its ioctl returns in
+# ~1.9ms. The original delays here were an order of magnitude larger than the
+# work, which made a repaint ~90% sleep, so they are tuned down and named.
+#
+# RESET_SETTLE stays generous: the controller genuinely needs a moment after a
+# reset, and getting that wrong is how you end up with a dark keyboard that
+# only a reboot clears.
+_RESET_SETTLE = 0.05
+_STEP_SETTLE = 0.01
+_FRAME_SETTLE = 0.002
+
 _CMD_EFFECT = 0x80
 _CMD_TURN_ON_SET = 0x83
 _CMD_UPDATE = 0x8B
@@ -65,12 +76,12 @@ def kbd_send(fd: int, payload) -> None:
 
 def reset(fd: int) -> None:
     kbd_send(fd, [_CMD_RESET])
-    time.sleep(0.05)
+    time.sleep(_RESET_SETTLE)
 
 
 def update(fd: int) -> None:
     kbd_send(fd, [_CMD_UPDATE, 0x01, 0xFF])
-    time.sleep(0.03)
+    time.sleep(_STEP_SETTLE)
 
 
 def clean_switch(fd: int) -> None:
@@ -86,7 +97,7 @@ def clean_switch(fd: int) -> None:
 
 def _turn_on_set(fd: int, brightness: int = 0xFF) -> None:
     kbd_send(fd, [_CMD_TURN_ON_SET, 0x38, 0x9C, max(0, min(255, int(brightness)))])
-    time.sleep(0.03)
+    time.sleep(_STEP_SETTLE)
 
 
 def _frames(fd: int, leds) -> None:
@@ -114,26 +125,33 @@ def _frame(fd: int, batch) -> None:
             max(0, min(255, int(blue))),
         ]
     kbd_send(fd, payload)
-    time.sleep(0.005)
+    time.sleep(_FRAME_SETTLE)
 
 
 def _commit(fd: int) -> None:
     kbd_send(fd, [_CMD_FRAME, 0x13])
-    time.sleep(0.03)
+    time.sleep(_STEP_SETTLE)
 
 
-def paint(fd: int, leds, brightness: int = 0xFF) -> None:
-    """Paint an explicit set of LEDs as one complete, committed frame."""
-    clean_switch(fd)
+def paint(fd: int, leds, brightness: int = 0xFF, clean: bool = True) -> None:
+    """Paint an explicit set of LEDs as one complete, committed frame.
+
+    ``clean`` runs the teardown that stops a firmware effect before painting.
+    It is required when coming from an effect, and pure overhead when the
+    controller is already showing a painted frame - it costs ~84ms, which is a
+    third of a repaint, so a colour drag skips it.
+    """
+    if clean:
+        clean_switch(fd)
     _turn_on_set(fd, brightness)
     _frames(fd, leds)
     _commit(fd)
     update(fd)
 
 
-def solid(fd: int, rgb, count: int = KBD_LED_COUNT) -> None:
+def solid(fd: int, rgb, count: int = KBD_LED_COUNT, clean: bool = True) -> None:
     red, green, blue = (max(0, min(255, int(channel))) for channel in rgb)
-    paint(fd, [(i, red, green, blue) for i in range(count)])
+    paint(fd, [(i, red, green, blue) for i in range(count)], clean=clean)
 
 
 def off(fd: int, count: int = KBD_LED_COUNT) -> None:
@@ -163,5 +181,5 @@ def firmware_effect(fd: int, effect: int, rgb, tempo: int = 60, colours: int = 1
             0x00, 0x00, 0x00,
         ],
     )
-    time.sleep(0.03)
+    time.sleep(_STEP_SETTLE)
     update(fd)

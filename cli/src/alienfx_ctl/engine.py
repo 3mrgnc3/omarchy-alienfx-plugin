@@ -8,6 +8,8 @@ QML - neither of them knows anything about HID.
 
 from __future__ import annotations
 
+import threading
+
 from . import apiv4, apiv5, colors, device, gradient, keymap, palette
 
 #: Effects offered to the user.  Chassis zones can only hold a flat colour, so
@@ -134,48 +136,81 @@ def apply(st, zones=None, persist: bool = False, fast: bool = False) -> dict:
     work = plan(st, zones)
     needed = list(work["zones"])
     fds = device.open_fds(needed)
-    try:
+    errors = []
+
+    # The two controllers are independent devices on independent descriptors,
+    # and they are wildly different speeds: the chassis ioctl blocks ~63ms per
+    # packet while the keyboard's returns in ~2ms. Writing them in sequence
+    # makes every keyboard repaint wait behind the slow chassis for no reason,
+    # so each controller gets its own thread and the apply costs the slower of
+    # the two rather than their sum.
+    def drive_chassis():
         elc_fd = fds.get("elc")
-        if elc_fd is not None and work["elc"]:
-            # Group zones that share a colour so identical colours cost one
-            # packet instead of three.
-            grouped = {}
-            for zone, rgb in work["elc"].items():
-                grouped.setdefault(tuple(rgb), []).extend(device.ELC_ZONES[zone])
-            apiv4.begin(elc_fd)
-            for rgb, ids in grouped.items():
-                apiv4.set_one_color(elc_fd, rgb, ids)
-            apiv4.commit(elc_fd)
-            if persist:
-                apiv4.persist(elc_fd, list(grouped.items()))
+        if elc_fd is None or not work["elc"]:
+            return
+        # Group zones sharing a colour so identical colours cost one packet
+        # instead of three - worth real time at 63ms each.
+        grouped = {}
+        for zone, rgb in work["elc"].items():
+            grouped.setdefault(tuple(rgb), []).extend(device.ELC_ZONES[zone])
+        apiv4.begin(elc_fd)
+        for rgb, ids in grouped.items():
+            apiv4.set_one_color(elc_fd, rgb, ids)
+        apiv4.commit(elc_fd)
+        if persist:
+            apiv4.persist(elc_fd, list(grouped.items()))
 
-            # The power button needs more than a colour write: the firmware's
-            # own power-state handler overwrites it at the next AC/battery/sleep
-            # transition. Programming the six state blocks is what makes the
-            # colour stick - but it costs ~30 packets, so the caller skips it
-            # while a colour drag is still in flight.
-            if not fast and "pbtn" in work["elc"]:
-                target = colors.to_hex(work["elc"]["pbtn"])
-                # Skip the ~30-packet walk when this colour is already in NVRAM.
-                # Without this, every theme repaint and every brightness nudge
-                # would pay for programming that changes nothing.
-                if st.get("pbtn_programmed") != target:
-                    apiv4.program_power_button(elc_fd, work["elc"]["pbtn"])
-                    st["pbtn_programmed"] = target
-                    work["power_programmed"] = target
+        # The power button needs more than a colour write: the firmware's own
+        # power-state handler overwrites it at the next AC/battery/sleep
+        # transition. Programming the six state blocks is what makes the colour
+        # stick, and it costs ~2s - so anything the user is actively driving
+        # passes fast=True and leaves it to a later commit.
+        if not fast and "pbtn" in work["elc"]:
+            target = colors.to_hex(work["elc"]["pbtn"])
+            if st.get("pbtn_programmed") != target:
+                apiv4.program_power_button(elc_fd, work["elc"]["pbtn"])
+                st["pbtn_programmed"] = target
+                work["power_programmed"] = target
 
+    def drive_keyboard():
         kbd_fd = fds.get("kbd")
-        if kbd_fd is not None:
-            if work["kbd_leds"] is not None:
-                apiv5.paint(kbd_fd, work["kbd_leds"])
-            elif work["kbd_effect"] is not None:
-                spec = work["kbd_effect"]
-                apiv5.firmware_effect(
-                    kbd_fd, spec["code"], spec["rgb"],
-                    tempo=spec["tempo"], colours=spec["colours"],
-                )
-            elif work["kbd_solid"] is not None:
-                apiv5.solid(kbd_fd, work["kbd_solid"])
+        if kbd_fd is None:
+            return
+        # The teardown is only needed when leaving a firmware effect. Going from
+        # one painted frame to another - every frame of a colour drag - it is
+        # 84ms of pure overhead.
+        already_painting = st.get("kbd_mode") == "paint"
+        if work["kbd_leds"] is not None:
+            apiv5.paint(kbd_fd, work["kbd_leds"], clean=not already_painting)
+            st["kbd_mode"] = "paint"
+        elif work["kbd_effect"] is not None:
+            spec = work["kbd_effect"]
+            apiv5.firmware_effect(
+                kbd_fd, spec["code"], spec["rgb"],
+                tempo=spec["tempo"], colours=spec["colours"],
+            )
+            st["kbd_mode"] = "effect"
+        elif work["kbd_solid"] is not None:
+            apiv5.solid(kbd_fd, work["kbd_solid"], clean=not already_painting)
+            st["kbd_mode"] = "paint"
+
+    def guarded(fn):
+        def run():
+            try:
+                fn()
+            except Exception as exc:  # surfaced after both threads finish
+                errors.append(exc)
+        return run
+
+    try:
+        threads = [threading.Thread(target=guarded(fn), daemon=True)
+                   for fn in (drive_chassis, drive_keyboard)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        if errors:
+            raise errors[0]
     finally:
         device.close_fds(fds)
     return work

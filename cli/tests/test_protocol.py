@@ -342,3 +342,30 @@ def test_power_button_charging_breathes_between_dim_and_full(monkeypatch):
     dim, full = bytes(charging[7:10]), bytes(charging[10:13])
     assert full == bytes([255, 200, 100])
     assert all(d < f for d, f in zip(dim, full) if f > 0), "dim end must be dimmer"
+
+
+def test_paint_can_skip_the_teardown(monkeypatch):
+    """clean_switch costs ~84ms and only matters when leaving a firmware
+    effect. Every frame of a colour drag would otherwise pay for nothing."""
+    rec = Recorder(); rec.install(monkeypatch, apiv5)
+    apiv5.paint(4, [(0, 1, 2, 3)], clean=False)
+    heads = [buf[1] for _r, buf in rec.frames]
+    # No disable frame and no reset: straight to turn-on-set.
+    assert not any(buf[1] == 0x80 and buf[2] == 0x01 and buf[3] == 0xFE for _r, buf in rec.frames)
+    assert 0x94 not in heads
+    assert heads[0] == 0x83, "must still turn the LEDs on"
+    assert 0x8C in heads and heads[-1] == 0x8B
+
+
+def test_paint_with_teardown_still_resets(monkeypatch):
+    rec = Recorder(); rec.install(monkeypatch, apiv5)
+    apiv5.paint(4, [(0, 1, 2, 3)], clean=True)
+    heads = [buf[1] for _r, buf in rec.frames]
+    assert 0x94 in heads, "coming from an effect requires the reset"
+
+
+def test_keyboard_pacing_is_smaller_than_the_chassis():
+    """The keyboard ioctl returns in ~2ms and the chassis blocks ~63ms, so
+    pacing them identically made a repaint mostly sleep."""
+    assert apiv5._FRAME_SETTLE < apiv5._STEP_SETTLE < apiv5._RESET_SETTLE
+    assert apiv5._STEP_SETTLE <= apiv4.ELC_PACKET_DELAY * 2
