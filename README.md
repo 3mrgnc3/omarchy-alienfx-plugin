@@ -17,11 +17,31 @@ Runs unprivileged. No `sudo`, no root daemon.
 | Keyboard | Darfon `0d62:d2b1`, APIv5 | per key |
 | Touchpad halo | AW-ELC `187c:0551`, APIv4 | one colour |
 | Lid logo | AW-ELC `187c:0551`, APIv4 | one colour |
-| Power button | AW-ELC `187c:0551`, APIv4 | one colour — **experimental**, see below |
+| Power button | AW-ELC `187c:0551`, APIv4 | one colour, via NVRAM power states |
 
 Developed and verified on an **Alienware m16 R2**, BIOS 1.19.0, Omarchy 4.0.2.
 
 ## Install
+
+Two ways, both supported.
+
+### From GitHub, the Omarchy way
+
+```bash
+omarchy plugin add https://github.com/3mrgnc3/omarchy-alienfx-plugin.git --enable
+```
+
+That clones the repo into `~/.config/omarchy/plugins/mrgnc.alienfx/` and puts the
+alien head on the bar. Click it and the popup will offer **Complete setup**, because
+`omarchy plugin add` installs only the QML — the udev rule that makes the hardware
+reachable without `sudo`, the CLI that drives it, and the systemd unit that restores
+your lighting at login all live outside the plugin folder.
+
+**Complete setup** opens a terminal and runs the installer bundled in the clone. It
+checks dependencies first, tells you what is missing, and asks before changing
+anything. The udev step needs your password once.
+
+### From a clone
 
 ```bash
 git clone https://github.com/3mrgnc3/omarchy-alienfx-plugin
@@ -29,7 +49,11 @@ cd omarchy-alienfx-plugin
 ./install.sh
 ```
 
-The installer is idempotent — re-run it to upgrade in place. It sets up:
+`--yes` installs missing dependencies without asking; `--no-deps` reports them and
+carries on regardless. Either way the installer is idempotent — re-run it to upgrade
+in place.
+
+It sets up:
 
 - `~/.local/bin/alienfx-ctl` plus its package in `~/.local/share/omarchy-alienfx-plugin/`
 - `/etc/udev/rules.d/60-omarchy-alienfx.rules` (the one step needing root)
@@ -37,14 +61,42 @@ The installer is idempotent — re-run it to upgrade in place. It sets up:
 - a `theme-set` hook drop-in, so theme switches repaint the lights
 - systemd `--user` units that restore your lighting at login and after suspend
 
-> **`omarchy plugin add <git-url>` on its own is not enough.** It installs only the QML.
-> The udev rule, the CLI and the restore unit all live outside the plugin folder, and
-> without them the widget loads but reports `CLI NOT FOUND`. Use `install.sh`.
+### Dependencies
 
-Uninstall with `./uninstall.sh` (keeps your profiles and keymap; `--purge` removes them).
+The installer checks these and separates the ones it cannot work without from the ones
+that merely degrade something:
+
+| Needed for | Package |
+|---|---|
+| **Required** — Omarchy itself, systemd, Python 3.11+ (`tomllib` reads theme palettes), and `sudo` or `pkexec` for the udev step | `python` |
+| Recommended — a Nerd Font, or the alien head renders as a blank box | `ttf-jetbrains-mono-nerd` |
+| Recommended — a terminal, for the KeyMap Wizard | `alacritty` |
+| Optional — `gum`, only to make the installer's prompts nicer | `gum` |
+
+Missing packages are installed with `omarchy pkg add`, falling back to `pacman`.
+
+### Uninstall
+
+```bash
+./uninstall.sh            # keeps your profiles and keymap
+./uninstall.sh --purge    # removes those too
+```
+
+Run this **before** `omarchy plugin remove mrgnc.alienfx`. That command deletes the
+plugin folder, which is all Omarchy knows about — the CLI, the udev rule and the
+systemd units live outside it and would be left behind. `uninstall.sh` removes the
+folder for you via `omarchy plugin remove` anyway, unless it is running from inside
+it, in which case it tells you to finish with that command.
+
+Removing the udev rule does not revoke an ACL that is already applied; the device
+nodes lose it at the next reboot or replug.
 
 ## The popup
 
+- **Complete setup** — appears only when the plugin can see that setup is unfinished:
+  either there is no CLI at all, or there is one but the device nodes are not writable
+  because the udev rule was never installed. Both leave the lights dead and look
+  identical from the outside, so both offer the same fix.
 - **KeyMap Wizard** — appears only while no keymap is installed, and self-hides once one
   is. Its first question is whether you already have a keymap file to import; only if you
   decline does it build one by lighting keys one at a time.
@@ -54,7 +106,9 @@ Uninstall with `./uninstall.sh` (keeps your profiles and keymap; `--purge` remov
 - **ZoneSync** — move all zones together, or turn it off to reveal the zone selector.
 - **Zone** — Keyboard / PowerButton / Touchpad / Logo.
 - **Colour** — click the swatch for R/G/B sliders. Changes land on the hardware in
-  realtime and autosave as you go.
+  realtime and autosave as you go. Picking a colour for a single zone switches the
+  effect to Solid, because Gradient derives every zone from its two anchors and would
+  compute a per-zone pick away.
 - **Effect** — Gradient (default), Wave, Pulse, Nightrider, Solid.
 - **Profile** — Load and Save. Saving over the loaded name overwrites it; typing a new
   name creates a new profile. A loaded profile persists across reboots.
@@ -142,9 +196,13 @@ pass the identity check.
 
 ## Known limits
 
-- **The power button is experimental.** Ordinary colour commands are overridden by the
-  firmware's own power-state handler. The colour only sticks via a power-state NVRAM
-  path, which is written but not yet verified — so treat that zone as best-effort.
+- **The power button takes the slow path.** Ordinary colour commands are overridden by
+  the firmware's own power-state handler, so a colour only sticks by programming six
+  NVRAM state blocks. That is done, and the zone shows your colour on AC and on
+  battery, breathes it while charging, and fades it out going to sleep — while still
+  warning in red when the battery is critical, which is the one bit of firmware
+  behaviour worth keeping. It costs ~2.3s, so it is skipped during a live colour drag
+  and whenever the colour already in NVRAM matches.
 - **Chassis zones cannot animate.** They are single-LED zones; Wave, Pulse and
   Nightrider are keyboard effects, and the chassis holds the base colour.
 - **Brightness is colour.** Neither controller exposes a brightness field on the paths

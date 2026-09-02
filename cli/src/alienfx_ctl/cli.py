@@ -96,6 +96,11 @@ def cmd_state(args) -> int:
         payload["profiles"] = state.list_profiles()
         payload["current_profile"] = state.current_profile()
         payload["has_keymap"] = keymap.has_user_keymap()
+        # The plugin needs to tell "no CLI" apart from "CLI present but the
+        # udev rule was never installed" - they look identical otherwise, and
+        # only the second one means the lights silently do nothing.
+        payload["devices_ok"] = _devices_ready()
+        payload["devices"] = _devices_report()
         payload["theme"] = palette.theme_name()
         payload["effects"] = list(engine.EFFECTS)
         payload["zone_names"] = list(device.ZONES)
@@ -367,6 +372,27 @@ def cmd_profile(args) -> int:
         return 0
 
     return _fail("unknown profile subcommand")
+
+
+def _devices_report():
+    """Per-controller discovery and writability, for diagnostics and the UI."""
+    report = {}
+    for key, label, vid, pid in (
+        ("elc", "AW-ELC chassis", device.ELC_VID, device.ELC_PID),
+        ("kbd", "keyboard", device.KBD_VID, device.KBD_PID),
+    ):
+        path = device.find_node(vid, pid)
+        report[key] = {
+            "label": label,
+            "path": path,
+            "found": path is not None,
+            "writable": bool(path) and os.access(path, os.R_OK | os.W_OK),
+        }
+    return report
+
+
+def _devices_ready() -> bool:
+    return all(entry["writable"] for entry in _devices_report().values())
 
 
 def cmd_devices(args) -> int:

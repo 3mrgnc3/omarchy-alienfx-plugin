@@ -35,6 +35,7 @@ Panel {
   property string currentProfile: ""
   property string themeName: ""
   property bool hasKeymap: true
+  property bool devicesOk: true
   property bool loaded: false
   property string errorText: ""
 
@@ -80,9 +81,11 @@ Panel {
   readonly property string wizardPath: setting("wizardPath", Quickshell.env("HOME") + "/.local/bin/omarchy-alienfx-wizard")
   readonly property string iconGlyph: setting("icon", Model.ICON.alien)
 
-  // True once we know there is no usable CLI: the widget then offers to finish
-  // the install rather than just reporting a broken state.
-  readonly property bool setupNeeded: !cliResolved && resolverDone
+  // Setup is unfinished in either of two ways, and they look identical from
+  // the outside: there is no CLI at all, or there is one but the udev rule was
+  // never installed so every write is denied. Both leave the lights dead, so
+  // both offer to finish the install.
+  readonly property bool setupNeeded: resolverDone && (!cliResolved || (loaded && !devicesOk))
 
   // Content colour, not chrome: this is the light being sent to the hardware.
   readonly property color previewColor: Qt.rgba(pickR / 255, pickG / 255, pickB / 255, 1)
@@ -135,6 +138,7 @@ Panel {
     root.currentProfile = parsed.current_profile || ""
     root.themeName = parsed.theme || ""
     root.hasKeymap = parsed.has_keymap === true
+    root.devicesOk = parsed.devices_ok !== false
     root.loaded = true
     root.errorText = ""
     syncPickerFromState()
@@ -319,7 +323,7 @@ Panel {
 
             Text {
               text: {
-                if (root.setupNeeded) return "SETUP REQUIRED"
+                if (root.setupNeeded) return root.cliResolved ? "NO DEVICE ACCESS" : "SETUP REQUIRED"
                 if (root.errorText !== "") return "ERROR"
                 if (!root.loaded) return "READING..."
                 if (root.themesync) return "THEMESYNC - " + (root.themeName || "theme").toUpperCase()
@@ -357,9 +361,13 @@ Panel {
 
           Text {
             width: parent.width
-            text: "The lighting controller needs a udev rule and a small CLI, which "
-                + "live outside the plugin folder. This opens a terminal and installs "
-                + "them - it will check dependencies first and ask before changing anything."
+            text: root.cliResolved
+              ? "The lighting controllers are not writable yet - the udev rule that grants "
+                + "access has not been installed. This opens a terminal and installs it; "
+                + "it needs your password once."
+              : "The lighting controller needs a udev rule and a small CLI, which live "
+                + "outside the plugin folder. This opens a terminal and installs them - "
+                + "it will check dependencies first and ask before changing anything."
             color: Qt.darker(root.fg, 1.3)
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
