@@ -209,7 +209,14 @@ def cmd_set(args) -> int:
         state.save_state(st)
         return 0
 
-    return _apply(st, list(device.ZONES) if st.get("zonesync") else zones, args)
+    # `zones` is already the right set: _parse_zones expands the default
+    # "selected" to every zone while ZoneSync is on. Re-expanding here would
+    # override an *explicit* --zones, which silently defeated the drag path -
+    # the UI asks for --zones kbd during a drag precisely because the keyboard
+    # costs ~92ms while the chassis costs ~320ms under a gradient (three zones
+    # at three different colours is three 63ms packets). Note the colour is
+    # still recorded against every zone above, so a later full apply picks it up.
+    return _apply(st, zones, args)
 
 
 def _safe_palette():
@@ -491,6 +498,69 @@ def cmd_devices(args) -> int:
     return 0
 
 
+def _format_ranges(values) -> str:
+    """Collapse a sorted index list into compact ranges for display."""
+    parts, start, previous = [], None, None
+    for value in values:
+        if start is None:
+            start = previous = value
+            continue
+        if value == previous + 1:
+            previous = value
+            continue
+        parts.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = value
+    if start is not None:
+        parts.append(str(start) if start == previous else f"{start}-{previous}")
+    return ", ".join(parts)
+
+
+def cmd_keymap_gaps(args) -> int:
+    """Report LED indices the keymap does not name.
+
+    Worth having because an incomplete keymap used to be invisible: the
+    gradient skipped unnamed indices and they kept whatever the last full-range
+    paint left on them, so a single key would sit on a stale colour with
+    nothing to explain it. The renderer now fills those from the nearest named
+    index, which fixes the symptom - this is how you see the cause.
+    """
+    data = keymap.load()
+    key_to_index = data.get("key_to_index") or {}
+    mapped = sorted(set(int(v) for v in key_to_index.values()))
+    total = apiv5.KBD_LED_COUNT
+    gaps = [i for i in range(total) if i not in set(mapped)]
+
+    print(f"keymap    : {keymap.describe(data)}")
+    print(f"source    : {'user' if keymap.has_user_keymap() else 'shipped default'}")
+    print(f"named     : {len(mapped)} of {total} LED indices "
+          f"(lowest {mapped[0] if mapped else '-'}, highest {mapped[-1] if mapped else '-'})")
+    print(f"unnamed   : {len(gaps)}")
+
+    by_index = {int(v): k for k, v in key_to_index.items()}
+    # A gap touching a named index is very likely a wide key's second LED: the
+    # firmware lays LEDs out in contiguous per-row blocks, so a key wider than
+    # 1u covers more than one adjacent index while the keymap records only one.
+    siblings = []
+    for gap in gaps:
+        neighbours = [n for n in (gap - 1, gap + 1) if n in by_index]
+        if neighbours:
+            siblings.append((gap, [by_index[n] for n in neighbours]))
+
+    if siblings:
+        print()
+        print("probable wide-key siblings (unnamed, but adjacent to a named key):")
+        for gap, names in siblings:
+            print(f"  {gap:3d}  next to {', '.join(names)}")
+    if gaps:
+        print()
+        print(f"all unnamed: {_format_ranges(gaps)}")
+        print()
+        print("These are filled from the nearest named index, so none of them can")
+        print("hold a stale colour. Name them with 'alienfx-ctl keymap wizard' only")
+        print("if you want their exact gradient position rather than a neighbour's.")
+    return 0
+
+
 def cmd_keymap(args) -> int:
     if args.keymap_command == "status":
         if keymap.has_user_keymap():
@@ -633,6 +703,8 @@ def build_parser() -> argparse.ArgumentParser:
     q.set_defaults(func=cmd_keymap)
     q = psub.add_parser("show", help="describe the active keymap")
     q.set_defaults(func=cmd_keymap)
+    q = psub.add_parser("gaps", help="report LED indices the keymap does not name")
+    q.set_defaults(func=cmd_keymap_gaps)
     q = psub.add_parser("import", help="install an existing keymap file")
     q.add_argument("path")
     q.set_defaults(func=cmd_keymap)

@@ -34,9 +34,16 @@ _LEDS_PER_PACKET = 15
 # RESET_SETTLE stays generous: the controller genuinely needs a moment after a
 # reset, and getting that wrong is how you end up with a dark keyboard that
 # only a reboot clears.
+#
+# FRAME_SETTLE is per colour packet, and a full-range paint is 14 of them, so it
+# is the one that compounds. The ioctl itself already blocks ~2.6ms, so 1ms here
+# still leaves a real gap between packets. The command *sequence* is deliberately
+# not shortened any further than the conditional clean_switch: a partial APIv5
+# sequence leaves the controller dark until a reboot, and that is not a trade
+# worth a few milliseconds.
 _RESET_SETTLE = 0.05
 _STEP_SETTLE = 0.01
-_FRAME_SETTLE = 0.002
+_FRAME_SETTLE = 0.001
 
 _CMD_EFFECT = 0x80
 _CMD_TURN_ON_SET = 0x83

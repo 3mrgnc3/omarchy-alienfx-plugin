@@ -88,3 +88,75 @@ def test_a_blocked_final_value_reports_failure(monkeypatch, config_root):
     monkeypatch.setattr(cli.lock, "hardware_lock",
                         lambda wait, drop_if_busy: (_ for _ in ()).throw(lock.Busy("busy")))
     assert cli._apply(state.load_state(), ["kbd"], Args(fast=True)) != 0
+
+
+# --------------------------------------------------------- zone targeting
+#
+# The UI asks for --zones kbd during a colour drag on purpose: the keyboard
+# costs ~92ms for a full-range repaint while the chassis costs ~320ms under a
+# gradient (three zones at three different colours is three 63ms packets).
+# ZoneSync used to re-expand that back to every zone, silently throwing the
+# optimisation away and making every drag frame pay for the slow controller.
+
+@pytest.fixture()
+def applied(monkeypatch):
+    """Capture the zone list cmd_set hands to _apply."""
+    seen = {}
+    monkeypatch.setattr(cli, "_apply",
+                        lambda st, zones, args, save=True: (seen.update(zones=list(zones)), 0)[1])
+    return seen
+
+
+def _set_args(**kw):
+    args = Args(**kw)
+    for name, default in (("color", None), ("zones", "selected"), ("brightness", None),
+                          ("saturation", None), ("min_saturation", None), ("effect", None),
+                          ("axis", None), ("speed", None), ("themesync", None),
+                          ("zonesync", None), ("select", None)):
+        if not hasattr(args, name):
+            setattr(args, name, default)
+    return args
+
+
+def test_explicit_zones_wins_over_zonesync(applied, config_root):
+    """A drag frame must reach only the controller it named."""
+    st = state.load_state()
+    st["zonesync"] = True
+    state.save_state(st)
+    cli.cmd_set(_set_args(zones="kbd", color="ff7800", fast=True, drop_if_busy=True))
+    assert applied["zones"] == ["kbd"], "ZoneSync re-expanded an explicit --zones"
+
+
+def test_the_default_still_covers_every_zone_when_synced(applied, config_root):
+    st = state.load_state()
+    st["zonesync"] = True
+    state.save_state(st)
+    cli.cmd_set(_set_args(color="ff7800"))
+    assert set(applied["zones"]) == set(cli.device.ZONES)
+
+
+def test_a_drag_frame_still_records_the_colour_for_every_zone(config_root, monkeypatch):
+    """Only the keyboard is written, but all four zones must remember the
+    colour - otherwise the release, which writes them all, would use a stale
+    value for the three it skipped.
+
+    Asserts on the state handed to _apply, since _apply is what persists it.
+    """
+    captured = {}
+    monkeypatch.setattr(cli, "_apply",
+                        lambda st, zones, args, save=True: (captured.update(st=st), 0)[1])
+    st = state.load_state()
+    st["zonesync"] = True
+    state.save_state(st)
+    cli.cmd_set(_set_args(zones="kbd", color="aa3311", fast=True, drop_if_busy=True))
+    for zone in cli.device.ZONES:
+        assert captured["st"]["zones"][zone]["color"] == "aa3311"
+
+
+def test_unsynced_zones_target_only_the_selection(applied, config_root):
+    st = state.load_state()
+    st["zonesync"] = False
+    st["selected_zone"] = "logo"
+    state.save_state(st)
+    cli.cmd_set(_set_args(color="00ff00"))
+    assert applied["zones"] == ["logo"]
