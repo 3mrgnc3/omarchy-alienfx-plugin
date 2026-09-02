@@ -1,0 +1,90 @@
+"""Keymap validation and import."""
+
+import json
+
+import pytest
+
+from alienfx_ctl import keymap
+
+
+def good():
+    return {
+        "device": "Test",
+        "key_to_index": {"esc": 0, "a": 1},
+        "grid_positions": {"esc": {"row": 0, "col": 0}, "a": {"row": 1, "col": 0}},
+    }
+
+
+def test_valid_keymap_passes():
+    assert keymap.validate(good()) is not None
+
+
+def test_the_shipped_keymap_is_valid():
+    """The fallback map must always load, or a fresh install cannot render."""
+    data = keymap.load_file(keymap.SHIPPED_KEYMAP)
+    assert data["key_to_index"]
+    assert data["grid_positions"]
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda d: d.pop("key_to_index"),
+    lambda d: d.pop("grid_positions"),
+    lambda d: d.update(key_to_index={}),
+    lambda d: d.update(key_to_index={"a": "one"}),
+    lambda d: d.update(key_to_index={"a": -1}),
+    lambda d: d.update(key_to_index={"a": 500}),
+    lambda d: d.update(key_to_index={"a": True}),
+    lambda d: d.update(grid_positions={"a": {"row": 0}}),
+    lambda d: d.update(grid_positions={"a": {"row": -1, "col": 0}}),
+    lambda d: d.update(grid_positions={"a": "nope"}),
+    lambda d: d.update(grid_positions={"a": [1, 2, 3]}),
+])
+def test_malformed_keymaps_are_rejected(mutate):
+    """Rejected rather than repaired: a bad index paints the wrong keys, which
+    is more confusing than a clear error."""
+    data = good()
+    mutate(data)
+    with pytest.raises(keymap.KeymapError):
+        keymap.validate(data)
+
+
+def test_non_object_is_rejected():
+    with pytest.raises(keymap.KeymapError):
+        keymap.validate([1, 2, 3])
+
+
+def test_import_installs_the_user_keymap(config_root, tmp_path):
+    source = tmp_path / "mine.json"
+    source.write_text(json.dumps(good()), encoding="utf-8")
+
+    assert keymap.has_user_keymap() is False
+    target = keymap.import_file(str(source))
+    assert keymap.has_user_keymap() is True
+    assert json.load(open(target, encoding="utf-8"))["device"] == "Test"
+
+
+def test_import_rejects_a_bad_file_without_installing(config_root, tmp_path):
+    source = tmp_path / "bad.json"
+    source.write_text('{"key_to_index": {}}', encoding="utf-8")
+    with pytest.raises(keymap.KeymapError):
+        keymap.import_file(str(source))
+    assert keymap.has_user_keymap() is False
+
+
+def test_import_rejects_invalid_json(config_root, tmp_path):
+    source = tmp_path / "bad.json"
+    source.write_text("{oh no", encoding="utf-8")
+    with pytest.raises(keymap.KeymapError):
+        keymap.import_file(str(source))
+
+
+def test_user_keymap_wins_over_the_shipped_one(config_root, tmp_path):
+    source = tmp_path / "mine.json"
+    source.write_text(json.dumps(good()), encoding="utf-8")
+    keymap.import_file(str(source))
+    assert keymap.load()["device"] == "Test"
+
+
+def test_load_falls_back_to_shipped(config_root):
+    assert keymap.has_user_keymap() is False
+    assert keymap.load()["key_to_index"]

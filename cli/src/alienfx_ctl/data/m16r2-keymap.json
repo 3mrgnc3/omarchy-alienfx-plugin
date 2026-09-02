@@ -1,0 +1,608 @@
+{
+  "device": "Alienware m16 R2",
+  "vid_pid": "0d62:d2b1",
+  "key_to_index": {
+    "esc": 0,
+    "f1": 1,
+    "f2": 2,
+    "f3": 3,
+    "f4": 4,
+    "f5": 5,
+    "f6": 6,
+    "f7": 7,
+    "f8": 8,
+    "f9": 9,
+    "f10": 10,
+    "f11": 11,
+    "f12": 12,
+    "home": 13,
+    "end": 14,
+    "delete": 15,
+    "grave": 20,
+    "1": 21,
+    "2": 22,
+    "3": 23,
+    "4": 24,
+    "5": 25,
+    "6": 26,
+    "7": 27,
+    "8": 28,
+    "9": 29,
+    "0": 30,
+    "minus": 31,
+    "equal": 32,
+    "backspace": 34,
+    "micmute": 159,
+    "tab": 40,
+    "q": 42,
+    "w": 43,
+    "e": 44,
+    "r": 45,
+    "t": 46,
+    "y": 47,
+    "u": 48,
+    "i": 49,
+    "o": 50,
+    "p": 51,
+    "lbracket": 52,
+    "rbracket": 53,
+    "backslash": 54,
+    "mute": 156,
+    "capslock": 61,
+    "a": 62,
+    "s": 63,
+    "d": 64,
+    "f": 65,
+    "g": 66,
+    "h": 67,
+    "j": 68,
+    "k": 69,
+    "l": 70,
+    "semicolon": 71,
+    "apostrophe": 72,
+    "enter": 74,
+    "volumeup": 158,
+    "lshift": 81,
+    "z": 83,
+    "x": 84,
+    "c": 85,
+    "v": 86,
+    "b": 87,
+    "n": 88,
+    "m": 89,
+    "comma": 90,
+    "dot": 91,
+    "slash": 92,
+    "rshift": 94,
+    "up": 114,
+    "volumedown": 157,
+    "lctrl": 100,
+    "fn": 101,
+    "lmeta": 102,
+    "lalt": 104,
+    "space": 107,
+    "ralt": 111,
+    "winlock": 109,
+    "rctrl": 112,
+    "left": 133,
+    "down": 134,
+    "right": 135
+  },
+  "index_to_key": {
+    "0": "esc",
+    "1": "f1",
+    "2": "f2",
+    "3": "f3",
+    "4": "f4",
+    "5": "f5",
+    "6": "f6",
+    "7": "f7",
+    "8": "f8",
+    "9": "f9",
+    "10": "f10",
+    "11": "f11",
+    "12": "f12",
+    "13": "home",
+    "14": "end",
+    "15": "delete",
+    "20": "grave",
+    "21": "1",
+    "22": "2",
+    "23": "3",
+    "24": "4",
+    "25": "5",
+    "26": "6",
+    "27": "7",
+    "28": "8",
+    "29": "9",
+    "30": "0",
+    "31": "minus",
+    "32": "equal",
+    "34": "backspace",
+    "159": "micmute",
+    "40": "tab",
+    "42": "q",
+    "43": "w",
+    "44": "e",
+    "45": "r",
+    "46": "t",
+    "47": "y",
+    "48": "u",
+    "49": "i",
+    "50": "o",
+    "51": "p",
+    "52": "lbracket",
+    "53": "rbracket",
+    "54": "backslash",
+    "156": "mute",
+    "61": "capslock",
+    "62": "a",
+    "63": "s",
+    "64": "d",
+    "65": "f",
+    "66": "g",
+    "67": "h",
+    "68": "j",
+    "69": "k",
+    "70": "l",
+    "71": "semicolon",
+    "72": "apostrophe",
+    "74": "enter",
+    "158": "volumeup",
+    "81": "lshift",
+    "83": "z",
+    "84": "x",
+    "85": "c",
+    "86": "v",
+    "87": "b",
+    "88": "n",
+    "89": "m",
+    "90": "comma",
+    "91": "dot",
+    "94": "rshift",
+    "114": "up",
+    "157": "volumedown",
+    "100": "lctrl",
+    "101": "fn",
+    "102": "lmeta",
+    "104": "lalt",
+    "107": "space",
+    "111": "ralt",
+    "109": "winlock",
+    "112": "rctrl",
+    "133": "left",
+    "134": "down",
+    "135": "right",
+    "92": "slash"
+  },
+  "grid_positions": {
+    "esc": {
+      "row": 0,
+      "col": 0
+    },
+    "f1": {
+      "row": 0,
+      "col": 1
+    },
+    "f2": {
+      "row": 0,
+      "col": 2
+    },
+    "f3": {
+      "row": 0,
+      "col": 3
+    },
+    "f4": {
+      "row": 0,
+      "col": 4
+    },
+    "f5": {
+      "row": 0,
+      "col": 5
+    },
+    "f6": {
+      "row": 0,
+      "col": 6
+    },
+    "f7": {
+      "row": 0,
+      "col": 7
+    },
+    "f8": {
+      "row": 0,
+      "col": 8
+    },
+    "f9": {
+      "row": 0,
+      "col": 9
+    },
+    "f10": {
+      "row": 0,
+      "col": 10
+    },
+    "f11": {
+      "row": 0,
+      "col": 11
+    },
+    "f12": {
+      "row": 0,
+      "col": 12
+    },
+    "home": {
+      "row": 0,
+      "col": 13
+    },
+    "end": {
+      "row": 0,
+      "col": 14
+    },
+    "delete": {
+      "row": 0,
+      "col": 15
+    },
+    "grave": {
+      "row": 1,
+      "col": 0
+    },
+    "1": {
+      "row": 1,
+      "col": 1
+    },
+    "2": {
+      "row": 1,
+      "col": 2
+    },
+    "3": {
+      "row": 1,
+      "col": 3
+    },
+    "4": {
+      "row": 1,
+      "col": 4
+    },
+    "5": {
+      "row": 1,
+      "col": 5
+    },
+    "6": {
+      "row": 1,
+      "col": 6
+    },
+    "7": {
+      "row": 1,
+      "col": 7
+    },
+    "8": {
+      "row": 1,
+      "col": 8
+    },
+    "9": {
+      "row": 1,
+      "col": 9
+    },
+    "0": {
+      "row": 1,
+      "col": 10
+    },
+    "minus": {
+      "row": 1,
+      "col": 11
+    },
+    "equal": {
+      "row": 1,
+      "col": 12
+    },
+    "backspace": {
+      "row": 1,
+      "col": 13
+    },
+    "micmute": {
+      "row": 1,
+      "col": 16
+    },
+    "tab": {
+      "row": 2,
+      "col": 0
+    },
+    "q": {
+      "row": 2,
+      "col": 1
+    },
+    "w": {
+      "row": 2,
+      "col": 2
+    },
+    "e": {
+      "row": 2,
+      "col": 3
+    },
+    "r": {
+      "row": 2,
+      "col": 4
+    },
+    "t": {
+      "row": 2,
+      "col": 5
+    },
+    "y": {
+      "row": 2,
+      "col": 6
+    },
+    "u": {
+      "row": 2,
+      "col": 7
+    },
+    "i": {
+      "row": 2,
+      "col": 8
+    },
+    "o": {
+      "row": 2,
+      "col": 9
+    },
+    "p": {
+      "row": 2,
+      "col": 10
+    },
+    "lbracket": {
+      "row": 2,
+      "col": 11
+    },
+    "rbracket": {
+      "row": 2,
+      "col": 12
+    },
+    "backslash": {
+      "row": 2,
+      "col": 13
+    },
+    "mute": {
+      "row": 2,
+      "col": 16
+    },
+    "capslock": {
+      "row": 3,
+      "col": 0
+    },
+    "a": {
+      "row": 3,
+      "col": 1
+    },
+    "s": {
+      "row": 3,
+      "col": 2
+    },
+    "d": {
+      "row": 3,
+      "col": 3
+    },
+    "f": {
+      "row": 3,
+      "col": 4
+    },
+    "g": {
+      "row": 3,
+      "col": 5
+    },
+    "h": {
+      "row": 3,
+      "col": 6
+    },
+    "j": {
+      "row": 3,
+      "col": 7
+    },
+    "k": {
+      "row": 3,
+      "col": 8
+    },
+    "l": {
+      "row": 3,
+      "col": 9
+    },
+    "semicolon": {
+      "row": 3,
+      "col": 10
+    },
+    "apostrophe": {
+      "row": 3,
+      "col": 11
+    },
+    "enter": {
+      "row": 3,
+      "col": 13
+    },
+    "volumeup": {
+      "row": 3,
+      "col": 16
+    },
+    "lshift": {
+      "row": 4,
+      "col": 0
+    },
+    "z": {
+      "row": 4,
+      "col": 1
+    },
+    "x": {
+      "row": 4,
+      "col": 2
+    },
+    "c": {
+      "row": 4,
+      "col": 3
+    },
+    "v": {
+      "row": 4,
+      "col": 4
+    },
+    "b": {
+      "row": 4,
+      "col": 5
+    },
+    "n": {
+      "row": 4,
+      "col": 6
+    },
+    "m": {
+      "row": 4,
+      "col": 7
+    },
+    "comma": {
+      "row": 4,
+      "col": 8
+    },
+    "dot": {
+      "row": 4,
+      "col": 9
+    },
+    "slash": {
+      "row": 4,
+      "col": 10
+    },
+    "rshift": {
+      "row": 4,
+      "col": 12
+    },
+    "up": {
+      "row": 4,
+      "col": 14
+    },
+    "volumedown": {
+      "row": 4,
+      "col": 16
+    },
+    "lctrl": {
+      "row": 5,
+      "col": 0
+    },
+    "fn": {
+      "row": 5,
+      "col": 1
+    },
+    "lmeta": {
+      "row": 5,
+      "col": 2
+    },
+    "lalt": {
+      "row": 5,
+      "col": 3
+    },
+    "space": {
+      "row": 5,
+      "col": 6
+    },
+    "ralt": {
+      "row": 5,
+      "col": 10
+    },
+    "winlock": {
+      "row": 5,
+      "col": 11
+    },
+    "rctrl": {
+      "row": 5,
+      "col": 12
+    },
+    "left": {
+      "row": 5,
+      "col": 13
+    },
+    "down": {
+      "row": 5,
+      "col": 14
+    },
+    "right": {
+      "row": 5,
+      "col": 15
+    }
+  },
+  "secondary_functions": {
+    "esc": ".",
+    "f1": "boost_cycle",
+    "f2": "macro_1",
+    "f3": "macro_2",
+    "f4": "macro_3",
+    "f5": "macro_4",
+    "f6": "macro_5",
+    "f7": "kbd_backlight",
+    "f8": "display_switch",
+    "f9": "bluetooth",
+    "f10": "brightness_down",
+    "f11": "brightness_up",
+    "f12": "touchpad_toggle",
+    "home": "print_screen",
+    "end": "pause",
+    "delete": "insert",
+    "grave": "~",
+    "1": "!",
+    "2": "@",
+    "3": "#",
+    "4": "$",
+    "5": "%",
+    "6": "^",
+    "7": "&",
+    "8": "*",
+    "9": "(",
+    "0": ")",
+    "minus": "_",
+    "equal": "+",
+    "backspace": ".",
+    "micmute": ".",
+    "tab": ".",
+    "q": ".",
+    "w": ".",
+    "e": ".",
+    "r": ".",
+    "t": ".",
+    "y": ".",
+    "u": ".",
+    "i": ".",
+    "o": ".",
+    "p": ".",
+    "lbracket": "{",
+    "rbracket": "}",
+    "backslash": "|",
+    "mute": ".",
+    "capslock": ".",
+    "a": ".",
+    "s": ".",
+    "d": ".",
+    "f": ".",
+    "g": ".",
+    "h": ".",
+    "j": ".",
+    "k": ".",
+    "l": ".",
+    "semicolon": ":",
+    "apostrophe": "\"",
+    "enter": ".",
+    "volumeup": ".",
+    "lshift": ".",
+    "z": ".",
+    "x": ".",
+    "c": ".",
+    "v": ".",
+    "b": ".",
+    "n": ".",
+    "m": ".",
+    "comma": "<",
+    "dot": ">",
+    "slash": "?",
+    "rshift": ".",
+    "up": ".",
+    "volumedown": ".",
+    "lctrl": ".",
+    "fn": ".",
+    "lmeta": ".",
+    "lalt": ".",
+    "space": ".",
+    "ralt": ".",
+    "winlock": "win_lock_toggle",
+    "rctrl": ".",
+    "left": ".",
+    "down": ".",
+    "right": "."
+  },
+  "total_mapped": 85
+}

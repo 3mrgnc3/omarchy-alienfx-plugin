@@ -1,0 +1,12 @@
+[Unit]
+Description=Restore Alienware RGB lighting after suspend
+Documentation=https://github.com/3mrgnc3/omarchy-alienfx-plugin
+After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/sleep 2
+ExecStart=%h/.local/bin/alienfx-ctl restore --tolerant
+
+[Install]
+WantedBy=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target

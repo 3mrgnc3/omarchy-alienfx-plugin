@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "mrgnc.alienfx",
+  "name": "AlienFX",
+  "version": "0.1.0",
+  "author": "3mrgnc3",
+  "description": "Alienware RGB zone control with a theme-synced diagonal gradient",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "AlienFX",
+    "description": "Alienware RGB zone control with a theme-synced diagonal gradient",
+    "category": "System",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}

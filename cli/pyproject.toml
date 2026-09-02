@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alienfx-ctl"
+version = "0.1.0"
+description = "RGB zone control for Alienware laptops on Omarchy Linux"
+requires-python = ">=3.11"
+# Deliberately zero runtime dependencies: this runs on a fresh Omarchy install
+# with nothing but the system Python.
+dependencies = []
+
+[project.scripts]
+alienfx-ctl = "alienfx_ctl.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+alienfx_ctl = ["data/*.json"]

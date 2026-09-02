@@ -1,0 +1,26 @@
+# Omarchy AlienFX plugin - grant the logged-in seat user direct access to the
+# lighting controllers, so nothing in this project ever needs sudo.
+#
+# TAG+="uaccess" makes systemd put an ACL on the device node for whoever is
+# logged into the local seat. Verify with `ls -la /dev/hidraw*`: a trailing "+"
+# on the permission column means the ACL is present.
+#
+# Install:
+#   sudo install -m 0644 99-omarchy-alienfx.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger --subsystem-match=hidraw --action=add
+#
+# Note --action=add rather than "change": a change event does not re-evaluate
+# the tag on these devices, which leaves the keyboard node root-only.
+#
+# The "60-" prefix is load-bearing. The ACL is applied by the "uaccess" builtin
+# invoked from /usr/lib/udev/rules.d/73-seat-late.rules, which only sees tags
+# that were already set when it runs. A rule numbered above 73 adds the tag too
+# late, the builtin never fires, and the keyboard node stays root-only - which
+# looks exactly like a boot-time race and is not one. Keep this below 73.
+
+# AW-ELC chassis controller: touchpad halo, lid logo, power button
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="187c", ATTRS{idProduct}=="0551", TAG+="uaccess"
+
+# Per-key keyboard controller
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0d62", ATTRS{idProduct}=="d2b1", TAG+="uaccess"

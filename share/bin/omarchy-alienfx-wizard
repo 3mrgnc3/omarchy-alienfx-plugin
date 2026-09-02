@@ -1,0 +1,27 @@
+#!/bin/bash
+# Launch the KeyMap Wizard in a terminal window.
+#
+# The wizard is a step-through interactive flow, which a terminal already does
+# well; rebuilding that in QML would be a lot of surface for no gain. The
+# window is kept open at the end so the result stays readable.
+
+set -u
+CLI="${ALIENFX_CTL:-$HOME/.local/bin/alienfx-ctl}"
+[[ -x $CLI ]] || CLI="$(command -v alienfx-ctl 2>/dev/null || echo "$CLI")"
+
+inner="'$CLI' keymap wizard; status=\$?; printf '\n[press Enter to close] '; read -r _; exit \$status"
+
+if command -v omarchy-launch-or-focus-tui >/dev/null 2>&1; then
+  exec omarchy-launch-or-focus-tui --app-id=alienfx-wizard bash -lc "$inner"
+elif command -v omarchy-launch-terminal >/dev/null 2>&1; then
+  exec omarchy-launch-terminal bash -lc "$inner"
+fi
+
+for term in ghostty kitty alacritty foot; do
+  if command -v "$term" >/dev/null 2>&1; then
+    exec "$term" -e bash -lc "$inner"
+  fi
+done
+
+echo "omarchy-alienfx-wizard: no terminal found; run '$CLI keymap wizard' yourself" >&2
+exit 1

@@ -1,0 +1,16 @@
+#!/bin/bash
+# Omarchy theme-set hook: repaint the Alienware zones from the new theme.
+#
+# Runs on every theme switch. `theme apply --quiet` is a no-op when ThemeSync
+# is off, so this hook is safe to leave installed permanently - the toggle in
+# the plugin is what decides whether anything happens.
+#
+# Failures are logged and swallowed: a lighting problem must never make an
+# Omarchy theme switch appear to fail.
+
+exec > >(systemd-cat -t omarchy-alienfx -p info) \
+     2> >(systemd-cat -t omarchy-alienfx -p warning)
+
+if command -v alienfx-ctl >/dev/null 2>&1; then
+  alienfx-ctl theme apply --quiet || true
+fi

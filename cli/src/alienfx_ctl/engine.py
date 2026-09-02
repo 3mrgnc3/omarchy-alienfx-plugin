@@ -1,0 +1,160 @@
+"""Turning a state dictionary into light.
+
+One entry point, ``apply``, owns the whole path: work out the colours, open
+only the controllers that are needed, write them, and close.  Keeping it in one
+place is what lets the CLI be a thin argument parser and the plugin be thin
+QML - neither of them knows anything about HID.
+"""
+
+from __future__ import annotations
+
+from . import apiv4, apiv5, colors, device, gradient, keymap, palette
+
+#: Effects offered to the user.  Chassis zones can only hold a flat colour, so
+#: the animated ones are keyboard-only and the chassis takes the base colour.
+EFFECTS = ("gradient", "solid", "wave", "pulse", "nightrider", "off")
+
+#: Animated effects are produced by the keyboard controller itself.
+_FIRMWARE_EFFECTS = {
+    "wave": (apiv5.EFFECT_WAVE, 1),
+    "pulse": (apiv5.EFFECT_BREATHING, 1),
+    "nightrider": (apiv5.EFFECT_NIGHTRIDER, 1),
+}
+
+
+class EngineError(RuntimeError):
+    """Raised when a scheme cannot be applied."""
+
+
+def _shape(rgb, st) -> tuple:
+    """Apply saturation shaping then brightness scaling, in that order.
+
+    Order matters: shaping first works on the full-range colour, so a dim
+    brightness does not starve the saturation boost of headroom.
+    """
+    shaped = colors.boost_hsv(
+        rgb,
+        float(st.get("saturation", 1.0) or 1.0),
+        float(st.get("value", 1.0) or 1.0),
+    )
+    return colors.scale(shaped, int(st.get("brightness", 255)))
+
+
+def effective_effect(st) -> str:
+    """ThemeSync always means the theme gradient, whatever else is stored."""
+    if st.get("themesync"):
+        return "gradient"
+    effect = str(st.get("effect", "gradient")).lower()
+    if effect not in EFFECTS:
+        raise EngineError(f"unknown effect {effect!r} (expected one of {', '.join(EFFECTS)})")
+    return effect
+
+
+def zone_color(st, zone: str) -> tuple:
+    """The colour a single zone should show, before shaping."""
+    zones = st.get("zones") or {}
+    if st.get("zonesync"):
+        # Synced: every zone follows the keyboard's pick, so there is one
+        # colour to change and no way for zones to drift apart.
+        source = zones.get("kbd") or {}
+    else:
+        source = zones.get(zone) or {}
+    spec = source.get("color") or "ffffff"
+    return colors.parse_color(spec)
+
+
+def resolve_anchors(st) -> tuple:
+    """The two ends of the gradient.
+
+    In ThemeSync mode both come from the active theme.  In manual mode the user
+    has picked one colour, so the far end is its complement - that way
+    "Gradient" is still a blend rather than a flat fill.
+    """
+    if st.get("themesync"):
+        return palette.anchors()
+    primary = zone_color(st, "kbd")
+    return primary, colors.complement(primary)
+
+
+def plan(st, zones=None) -> dict:
+    """Compute what to send, without touching hardware.
+
+    Split out from ``apply`` so it can be unit-tested and so ``--dry-run`` can
+    show the exact colours that would be written.
+    """
+    targets = [z for z in (zones or device.ZONES) if z in device.ZONES]
+    if not targets:
+        raise EngineError("no valid zones requested")
+
+    effect = effective_effect(st)
+    result = {"effect": effect, "zones": targets, "kbd_leds": None,
+              "kbd_effect": None, "elc": {}, "kbd_solid": None}
+
+    elc_targets = [z for z in targets if z in device.ELC_ZONE_NAMES]
+
+    if effect == "off":
+        result["kbd_solid"] = (0, 0, 0) if "kbd" in targets else None
+        result["elc"] = {zone: (0, 0, 0) for zone in elc_targets}
+        return result
+
+    if effect == "gradient":
+        first, second = resolve_anchors(st)
+        axis = st.get("axis", gradient.DEFAULT_AXIS)
+        if "kbd" in targets:
+            leds = gradient.render_kbd(keymap.load(), first, second, axis)
+            result["kbd_leds"] = [(i, *_shape((r, g, b), st)) for i, r, g, b in leds]
+        samples = gradient.elc_samples(first, second)
+        result["elc"] = {zone: _shape(samples[zone], st) for zone in elc_targets}
+        return result
+
+    if effect == "solid":
+        if "kbd" in targets:
+            result["kbd_solid"] = _shape(zone_color(st, "kbd"), st)
+        result["elc"] = {zone: _shape(zone_color(st, zone), st) for zone in elc_targets}
+        return result
+
+    # Animated: the keyboard runs it in firmware, the chassis holds the colour.
+    code, colour_count = _FIRMWARE_EFFECTS[effect]
+    base = _shape(zone_color(st, "kbd"), st)
+    if "kbd" in targets:
+        tempo = apiv5.SPEED_PRESETS.get(str(st.get("speed", "medium")).lower(), 60)
+        result["kbd_effect"] = {"code": code, "rgb": base, "tempo": tempo, "colours": colour_count}
+    result["elc"] = {zone: _shape(zone_color(st, zone), st) for zone in elc_targets}
+    return result
+
+
+def apply(st, zones=None, persist: bool = False) -> dict:
+    """Apply a state to the hardware. Returns the plan that was written."""
+    work = plan(st, zones)
+    needed = list(work["zones"])
+    fds = device.open_fds(needed)
+    try:
+        elc_fd = fds.get("elc")
+        if elc_fd is not None and work["elc"]:
+            # Group zones that share a colour so identical colours cost one
+            # packet instead of three.
+            grouped = {}
+            for zone, rgb in work["elc"].items():
+                grouped.setdefault(tuple(rgb), []).extend(device.ELC_ZONES[zone])
+            apiv4._control(elc_fd, apiv4._SUB_START)
+            for rgb, ids in grouped.items():
+                apiv4.set_one_color(elc_fd, rgb, ids)
+            apiv4._control(elc_fd, apiv4._SUB_PLAY)
+            if persist:
+                apiv4.persist(elc_fd, list(grouped.items()))
+
+        kbd_fd = fds.get("kbd")
+        if kbd_fd is not None:
+            if work["kbd_leds"] is not None:
+                apiv5.paint(kbd_fd, work["kbd_leds"])
+            elif work["kbd_effect"] is not None:
+                spec = work["kbd_effect"]
+                apiv5.firmware_effect(
+                    kbd_fd, spec["code"], spec["rgb"],
+                    tempo=spec["tempo"], colours=spec["colours"],
+                )
+            elif work["kbd_solid"] is not None:
+                apiv5.solid(kbd_fd, work["kbd_solid"])
+    finally:
+        device.close_fds(fds)
+    return work

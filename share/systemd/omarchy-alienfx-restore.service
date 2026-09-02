@@ -1,0 +1,18 @@
+[Unit]
+Description=Restore Alienware RGB lighting from saved state
+Documentation=https://github.com/3mrgnc3/omarchy-alienfx-plugin
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+# --tolerant exits 0 when the hidraw ACL has not landed yet. A cold boot can
+# race seat setup, and a failed unit is worse than lighting that arrives a
+# moment later via the plugin or the next login.
+ExecStart=%h/.local/bin/alienfx-ctl restore --tolerant
+# Give the ACL a moment to appear before the first attempt.
+ExecStartPre=/usr/bin/sleep 3
+
+[Install]
+WantedBy=graphical-session.target
