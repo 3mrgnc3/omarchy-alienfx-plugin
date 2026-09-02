@@ -59,17 +59,69 @@ Panel {
   readonly property color fg: root.bar ? root.bar.foreground : Color.foreground
   readonly property string fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
 
+  // The directory this QML was loaded from. After `omarchy plugin add` that is
+  // a full clone of the repo, so the CLI and installer are sitting right here
+  // even before anything has been installed into ~/.local.
+  readonly property string pluginDir: {
+    var url = String(Qt.resolvedUrl("."))
+    if (url.indexOf("file://") === 0) url = url.substring(7)
+    while (url.length > 1 && url.charAt(url.length - 1) === "/") url = url.substring(0, url.length - 1)
+    return url
+  }
+
   // Absolute paths: the shell process does not necessarily carry ~/.local/bin
   // on PATH, so resolving by name would work for some users and not others.
-  readonly property string cliPath: setting("cliPath", Quickshell.env("HOME") + "/.local/bin/alienfx-ctl")
+  // `cliPath` is settled at runtime by cliResolver below, preferring an
+  // installed CLI and falling back to the bundled one.
+  property string cliPath: setting("cliPath", Quickshell.env("HOME") + "/.local/bin/alienfx-ctl")
+  property bool cliResolved: false
+  readonly property string bundledCli: pluginDir + "/cli/bin/alienfx-ctl"
+  readonly property string bundledInstaller: pluginDir + "/install.sh"
   readonly property string wizardPath: setting("wizardPath", Quickshell.env("HOME") + "/.local/bin/omarchy-alienfx-wizard")
   readonly property string iconGlyph: setting("icon", Model.ICON.alien)
+
+  // True once we know there is no usable CLI: the widget then offers to finish
+  // the install rather than just reporting a broken state.
+  readonly property bool setupNeeded: !cliResolved && resolverDone
 
   // Content colour, not chrome: this is the light being sent to the hardware.
   readonly property color previewColor: Qt.rgba(pickR / 255, pickG / 255, pickB / 255, 1)
 
   // ---------------------------------------------------------------- plumbing
+  property bool resolverDone: false
+
+  // Pick the first CLI that actually exists, preferring an installed one. Done
+  // in one shell call rather than probing from QML, which has no file tests.
+  function resolveCli() {
+    if (!cliResolver.running) cliResolver.running = true
+  }
+
+  function onCliResolved(text) {
+    var found = String(text || "").trim()
+    root.resolverDone = true
+    if (found !== "") {
+      root.cliPath = found
+      root.cliResolved = true
+      root.refresh()
+    } else {
+      root.cliResolved = false
+      root.loaded = false
+    }
+  }
+
+  function runSetup() {
+    // The udev step needs root, so this has to happen in a terminal where sudo
+    // (or pkexec) can prompt - not silently from the shell process.
+    Quickshell.execDetached([
+      "omarchy-launch-or-focus-tui", "--app-id=alienfx-setup",
+      "bash", "-lc",
+      "'" + root.bundledInstaller + "' ; printf '\\n[press Enter to close] ' ; read -r _"
+    ])
+    root.close()
+  }
+
   function refresh() {
+    if (!root.cliResolved) { resolveCli(); return }
     if (!stateProc.running) stateProc.running = true
   }
 
@@ -102,9 +154,13 @@ Panel {
     refreshTimer.restart()
   }
 
-  function applyPickedColor() {
+  // `live` marks an intermediate drag frame: it skips the slow power-button
+  // NVRAM programming and drops rather than queues if the hardware is busy.
+  function applyPickedColor(live) {
     var hex = Model.rgbToHex(root.pickR, root.pickG, root.pickB)
-    run(["set", "--zones", root.zonesync ? "all" : root.selectedZone, "--color", hex])
+    var args = ["set", "--zones", root.zonesync ? "all" : root.selectedZone, "--color", hex]
+    if (live) args.push("--fast")
+    run(args)
   }
 
   function setBrightness(value) {
@@ -114,6 +170,19 @@ Panel {
   function zoneDotColor(zone) {
     var rgb = Model.hexToRgb(Model.zoneHex(root.st, zone))
     return Qt.rgba(rgb.r / 255, rgb.g / 255, rgb.b / 255, 1)
+  }
+
+  Process {
+    id: cliResolver
+    command: ["sh", "-c",
+      "for p in \"$1\" \"$2\" \"$3\"; do [ -n \"$p\" ] && [ -x \"$p\" ] && { printf %s \"$p\"; exit 0; }; done; exit 1",
+      "sh",
+      Quickshell.env("HOME") + "/.local/bin/alienfx-ctl",
+      root.bundledCli,
+      "/usr/local/bin/alienfx-ctl"
+    ]
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.onCliResolved(text) }
+    onExited: function (code) { if (code !== 0) root.onCliResolved("") }
   }
 
   Process {
@@ -135,18 +204,20 @@ Panel {
     onTriggered: root.refresh()
   }
 
-  // Realtime-but-not-wasteful: repaint while dragging at ~9Hz, and always
-  // apply once more on release so the final value is exact.
+  // Realtime-but-not-wasteful. A chassis write costs ~190ms (the controller's
+  // ioctl blocks ~62ms per packet), so a faster cadence than this just makes
+  // frames queue up and drop against the hardware lock. Release always applies
+  // once more, so the value the user settles on is exact regardless.
   Timer {
     id: pickerDebounce
-    interval: 110
+    interval: 160
     repeat: false
-    onTriggered: root.applyPickedColor()
+    onTriggered: root.applyPickedColor(true)
   }
 
   Timer {
     id: brightnessDebounce
-    interval: 110
+    interval: 160
     repeat: false
     property int pending: 0
     onTriggered: root.setBrightness(pending)
@@ -162,13 +233,14 @@ Panel {
 
   onOpenedChanged: {
     if (opened) {
-      refresh()
+      // Re-resolve on open: setup may have completed since the last look.
+      resolveCli()
       cursorActive = false
       saveOpen = false
     }
   }
 
-  Component.onCompleted: refresh()
+  Component.onCompleted: resolveCli()
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -247,7 +319,8 @@ Panel {
 
             Text {
               text: {
-                if (root.errorText !== "") return "CLI NOT FOUND"
+                if (root.setupNeeded) return "SETUP REQUIRED"
+                if (root.errorText !== "") return "ERROR"
                 if (!root.loaded) return "READING..."
                 if (root.themesync) return "THEMESYNC - " + (root.themeName || "theme").toUpperCase()
                 return (Model.EFFECT_LABELS[root.effect] || root.effect).toUpperCase()
@@ -264,11 +337,56 @@ Panel {
           }
         }
 
-        // -------------------------------------------------- CLI missing
-        Text {
-          visible: root.errorText !== ""
+        // -------------------------------------------------- setup required
+        // Reached when the plugin was added straight from git: the QML is here
+        // but the CLI, udev rule and restore unit are not. Rather than just
+        // reporting that, offer to finish the job.
+        Column {
+          visible: root.setupNeeded
           width: parent.width
-          text: root.errorText + "\n\nRun ./install.sh from the plugin repo."
+          spacing: Style.space(9)
+
+          Text {
+            width: parent.width
+            text: "Setup needs finishing"
+            color: root.fg
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.subtitle
+            font.bold: true
+          }
+
+          Text {
+            width: parent.width
+            text: "The lighting controller needs a udev rule and a small CLI, which "
+                + "live outside the plugin folder. This opens a terminal and installs "
+                + "them - it will check dependencies first and ask before changing anything."
+            color: Qt.darker(root.fg, 1.3)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          Button {
+            width: parent.width
+            iconText: Model.ICON.check
+            iconSize: Style.font.title
+            text: "Complete setup"
+            fontSize: Style.font.bodySmall
+            foreground: root.fg
+            accent: Color.accent
+            fontFamily: root.fontFamily
+            bordered: true
+            leftAlign: true
+            verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
+            onClicked: root.runSetup()
+          }
+        }
+
+        // -------------------------------------------------- other errors
+        Text {
+          visible: !root.setupNeeded && root.errorText !== ""
+          width: parent.width
+          text: root.errorText
           color: Color.urgent
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
@@ -478,7 +596,7 @@ Panel {
               channel: root.pickR
               onChannelMoved: function (v) { root.pickR = v; pickerDebounce.restart() }
               onChannelReleased: function (v) {
-                root.pickR = v; pickerDebounce.stop(); root.applyPickedColor()
+                root.pickR = v; pickerDebounce.stop(); root.applyPickedColor(false)
               }
             }
             ChannelSlider {
@@ -487,7 +605,7 @@ Panel {
               channel: root.pickG
               onChannelMoved: function (v) { root.pickG = v; pickerDebounce.restart() }
               onChannelReleased: function (v) {
-                root.pickG = v; pickerDebounce.stop(); root.applyPickedColor()
+                root.pickG = v; pickerDebounce.stop(); root.applyPickedColor(false)
               }
             }
             ChannelSlider {
@@ -496,7 +614,7 @@ Panel {
               channel: root.pickB
               onChannelMoved: function (v) { root.pickB = v; pickerDebounce.restart() }
               onChannelReleased: function (v) {
-                root.pickB = v; pickerDebounce.stop(); root.applyPickedColor()
+                root.pickB = v; pickerDebounce.stop(); root.applyPickedColor(false)
               }
             }
           }

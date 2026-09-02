@@ -37,6 +37,7 @@ def _shape(rgb, st) -> tuple:
         float(st.get("saturation", 1.0) or 1.0),
         float(st.get("value", 1.0) or 1.0),
     )
+    shaped = colors.lift_saturation(shaped, float(st.get("min_saturation", 0.0) or 0.0))
     return colors.scale(shaped, int(st.get("brightness", 255)))
 
 
@@ -88,7 +89,8 @@ def plan(st, zones=None) -> dict:
 
     effect = effective_effect(st)
     result = {"effect": effect, "zones": targets, "kbd_leds": None,
-              "kbd_effect": None, "elc": {}, "kbd_solid": None}
+              "kbd_effect": None, "elc": {}, "kbd_solid": None,
+              "power_programmed": None}
 
     elc_targets = [z for z in targets if z in device.ELC_ZONE_NAMES]
 
@@ -123,8 +125,12 @@ def plan(st, zones=None) -> dict:
     return result
 
 
-def apply(st, zones=None, persist: bool = False) -> dict:
-    """Apply a state to the hardware. Returns the plan that was written."""
+def apply(st, zones=None, persist: bool = False, fast: bool = False) -> dict:
+    """Apply a state to the hardware. Returns the plan that was written.
+
+    ``fast`` skips the slow power-button state programming, for the
+    intermediate frames of a live colour drag.
+    """
     work = plan(st, zones)
     needed = list(work["zones"])
     fds = device.open_fds(needed)
@@ -136,12 +142,27 @@ def apply(st, zones=None, persist: bool = False) -> dict:
             grouped = {}
             for zone, rgb in work["elc"].items():
                 grouped.setdefault(tuple(rgb), []).extend(device.ELC_ZONES[zone])
-            apiv4._control(elc_fd, apiv4._SUB_START)
+            apiv4.begin(elc_fd)
             for rgb, ids in grouped.items():
                 apiv4.set_one_color(elc_fd, rgb, ids)
-            apiv4._control(elc_fd, apiv4._SUB_PLAY)
+            apiv4.commit(elc_fd)
             if persist:
                 apiv4.persist(elc_fd, list(grouped.items()))
+
+            # The power button needs more than a colour write: the firmware's
+            # own power-state handler overwrites it at the next AC/battery/sleep
+            # transition. Programming the six state blocks is what makes the
+            # colour stick - but it costs ~30 packets, so the caller skips it
+            # while a colour drag is still in flight.
+            if not fast and "pbtn" in work["elc"]:
+                target = colors.to_hex(work["elc"]["pbtn"])
+                # Skip the ~30-packet walk when this colour is already in NVRAM.
+                # Without this, every theme repaint and every brightness nudge
+                # would pay for programming that changes nothing.
+                if st.get("pbtn_programmed") != target:
+                    apiv4.program_power_button(elc_fd, work["elc"]["pbtn"])
+                    st["pbtn_programmed"] = target
+                    work["power_programmed"] = target
 
         kbd_fd = fds.get("kbd")
         if kbd_fd is not None:

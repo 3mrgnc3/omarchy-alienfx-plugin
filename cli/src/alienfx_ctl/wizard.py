@@ -83,15 +83,17 @@ def _build_flow(assume_yes: bool = False) -> int:
         return 1
 
     key_to_index: dict = {}
-    grid: dict = {}
     order: list = []
 
+    # Grid positions are derived from `order` and the row breaks *after*
+    # probing, not tracked alongside it. Tracking both meant a back-step could
+    # rewind the index without rewinding the column, silently desyncing the two
+    # and skewing the gradient for anyone who did not supply row breaks.
     try:
         index = 0
-        row, col = 0, 0
         while index <= _MAX_INDEX:
             apiv5.paint(fds["kbd"], [(index, *_PROBE_COLOR)])
-            answer = _ask(f"  LED {index:3d} (row {row}, col {col}) -> ")
+            answer = _ask(f"  LED {index:3d}  ({len(order)} mapped) -> ")
 
             if answer.lower() == "q":
                 break
@@ -99,13 +101,13 @@ def _build_flow(assume_yes: bool = False) -> int:
                 if order:
                     last = order.pop()
                     key_to_index.pop(last, None)
-                    grid.pop(last, None)
                     print(f"    removed {last!r}")
-                index = max(0, index - 1)
+                    index = key_to_index[order[-1]] + 1 if order else 0
+                else:
+                    index = 0
                 continue
             if not answer:
                 index += 1
-                col += 1
                 continue
 
             name = answer.lower()
@@ -113,10 +115,8 @@ def _build_flow(assume_yes: bool = False) -> int:
                 print(f"    {name!r} is already mapped to LED {key_to_index[name]}")
                 continue
             key_to_index[name] = index
-            grid[name] = {"row": row, "col": col}
             order.append(name)
             index += 1
-            col += 1
     finally:
         try:
             apiv5.off(fds["kbd"])
@@ -132,14 +132,18 @@ def _build_flow(assume_yes: bool = False) -> int:
     print("Enter the key that STARTS each row after the first, comma separated")
     print("(for example: 'tab, capslock, shift, ctrl'). Enter to keep one row.")
     breaks = [name.strip().lower() for name in _ask("  row starts: ").split(",") if name.strip()]
-    if breaks:
-        current_row, current_col = 0, 0
-        for name in order:
-            if name in breaks:
-                current_row += 1
-                current_col = 0
-            grid[name] = {"row": current_row, "col": current_col}
-            current_col += 1
+
+    # One pass over the probe order assigns every row/col. With no breaks this
+    # is a single row, which renders as a horizontal blend - a sane fallback
+    # rather than a broken grid.
+    grid: dict = {}
+    row = col = 0
+    for name in order:
+        if name in breaks:
+            row += 1
+            col = 0
+        grid[name] = {"row": row, "col": col}
+        col += 1
 
     data = {
         "device": _ask("  device name [Alienware]: ", "Alienware"),

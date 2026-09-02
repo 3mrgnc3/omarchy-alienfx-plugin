@@ -41,10 +41,16 @@ DEFAULT_STATE = {
     "axis": "tl-br",
     "brightness": DEFAULT_BRIGHTNESS,
     "speed": "medium",
-    # Keycaps sit behind a diffuser that washes colour out; a saturation push
-    # makes a theme colour read as the colour the user actually picked.
-    "saturation": 2.4,
+    # Keycaps sit behind a diffuser that washes colour out. A floor lifts a
+    # washed-out theme accent to something that still reads as a colour, while
+    # leaving an already-vivid accent exactly as the theme authored it. The
+    # multiplier stays available but defaults to a no-op.
+    "saturation": 1.0,
+    "min_saturation": 0.55,
     "selected_zone": "kbd",
+    # Last colour written into the power button's NVRAM state blocks. Lets the
+    # engine skip ~30 slow packets when nothing about that zone changed.
+    "pbtn_programmed": "",
     "zones": {
         "kbd": {"color": "ff7800"},
         "tpd": {"color": "ff7800"},

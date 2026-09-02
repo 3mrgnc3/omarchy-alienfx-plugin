@@ -1,16 +1,34 @@
 #!/bin/bash
 # Omarchy theme-set hook: repaint the Alienware zones from the new theme.
 #
-# Runs on every theme switch. `theme apply --quiet` is a no-op when ThemeSync
-# is off, so this hook is safe to leave installed permanently - the toggle in
-# the plugin is what decides whether anything happens.
+# Runs on every theme switch. `theme apply --quiet` is a no-op while ThemeSync
+# is off, so this is safe to leave installed permanently - the toggle in the
+# plugin decides whether anything happens.
+
+# Resolve the CLI by path rather than trusting PATH. Omarchy runs hooks from the
+# session environment, which does not necessarily carry ~/.local/bin - and a
+# hook that silently does nothing is worse than one that fails loudly.
+CLI="$HOME/.local/bin/alienfx-ctl"
+if [[ ! -x $CLI ]]; then
+  CLI="$(command -v alienfx-ctl 2>/dev/null)"
+fi
+[[ -n $CLI && -x $CLI ]] || exit 0
+
+# Repaint in the background so the theme switch returns immediately.
+#
+# Omarchy runs theme hooks synchronously, and a full repaint can take a couple
+# of seconds: the chassis controller's ioctl blocks ~62ms per packet, and if the
+# power button's colour changed, its six NVRAM state blocks have to be
+# rewritten. Blocking a theme switch on that would make theming feel broken, so
+# the lights catch up a moment later instead. The CLI takes a hardware lock, so
+# rapid theme switching cannot overlap two repaints.
 #
 # Failures are logged and swallowed: a lighting problem must never make an
-# Omarchy theme switch appear to fail.
-
-exec > >(systemd-cat -t omarchy-alienfx -p info) \
-     2> >(systemd-cat -t omarchy-alienfx -p warning)
-
-if command -v alienfx-ctl >/dev/null 2>&1; then
-  alienfx-ctl theme apply --quiet || true
-fi
+# Omarchy theme switch look like it failed.
+setsid bash -c '
+  exec > >(systemd-cat -t omarchy-alienfx -p info) \
+       2> >(systemd-cat -t omarchy-alienfx -p warning)
+  "$1" theme apply --quiet || true
+' _ "$CLI" >/dev/null 2>&1 &
+disown 2>/dev/null || true
+exit 0

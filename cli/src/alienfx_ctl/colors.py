@@ -27,6 +27,9 @@ NAMED_COLORS = {
 
 _HEX_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
 _SHORT_HEX_RE = re.compile(r"^#?([0-9a-fA-F]{3})$")
+#: Saturation below which a colour's hue carries no real information.
+_HUE_NOISE_FLOOR = 0.08
+
 _TRIPLE_RE = re.compile(r"^\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*$")
 
 
@@ -163,4 +166,29 @@ def complement(rgb, min_saturation: float = 0.35) -> tuple:
     sat = max(sat, min_saturation)
     val = max(val, 0.25)
     red, green, blue = colorsys.hsv_to_rgb(hue, sat, val)
+    return (round(red * 255), round(green * 255), round(blue * 255))
+
+
+def lift_saturation(rgb, minimum: float = 0.0) -> tuple:
+    """Raise a colour's saturation to a floor, leaving richer colours alone.
+
+    A blunt multiplier is the wrong tool here. Keycaps wash colour out, so a
+    desaturated theme accent does need help - but multiplying an already-vivid
+    accent just clamps it to a primary and throws the theme's character away
+    (a rose red becomes pure red). Lifting only what falls short of the floor
+    fixes the washed-out case and is a no-op for everything else.
+    """
+    if minimum <= 0.0:
+        return clamp_rgb(rgb)
+    red, green, blue = (channel / 255.0 for channel in clamp_rgb(rgb))
+    hue, sat, val = colorsys.rgb_to_hsv(red, green, blue)
+    if sat >= minimum:
+        return clamp_rgb(rgb)
+    # Below this, the hue is rounding noise rather than intent: a near-grey
+    # #8a8588 reads as "magenta" to the maths, and lifting it would invent a
+    # colour the theme never chose. A monochrome theme should light up
+    # monochrome.
+    if sat < _HUE_NOISE_FLOOR:
+        return clamp_rgb(rgb)
+    red, green, blue = colorsys.hsv_to_rgb(hue, min(1.0, minimum), val)
     return (round(red * 255), round(green * 255), round(blue * 255))

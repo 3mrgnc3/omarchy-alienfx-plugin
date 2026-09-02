@@ -93,3 +93,40 @@ def test_complement_of_grey_is_still_saturated():
 
 def test_hue_distance_wraps_the_colour_wheel():
     assert colors.hue_distance((255, 0, 0), (255, 0, 1)) < 0.01
+
+
+def test_lift_saturation_leaves_a_vivid_colour_untouched():
+    """Multiplying an already-vivid accent clamps it to a primary and throws
+    the theme's character away, so the floor must be a no-op here."""
+    vivid = colors.parse_color("be3f50")
+    assert colors.lift_saturation(vivid, 0.55) == vivid
+
+
+def test_lift_saturation_rescues_a_washed_out_colour():
+    washed = colors.parse_color("b59790")
+    lifted = colors.lift_saturation(washed, 0.55)
+    assert colors.saturation_of(lifted) == pytest.approx(0.55, abs=0.02)
+    # The hue must survive the lift; only the saturation changes.
+    assert colors.hue_distance(washed, lifted) < 0.02
+
+
+def test_lift_saturation_keeps_near_greys_neutral():
+    """At saturation 0.04 the hue is rounding noise. Lifting it would invent a
+    colour the theme never chose, so a monochrome theme stays monochrome."""
+    grey = colors.parse_color("8a8588")
+    assert colors.lift_saturation(grey, 0.55) == grey
+
+
+def test_lift_saturation_of_pure_grey_is_identity():
+    assert colors.lift_saturation((128, 128, 128), 0.9) == (128, 128, 128)
+
+
+def test_lift_saturation_zero_floor_is_identity():
+    washed = colors.parse_color("b59790")
+    assert colors.lift_saturation(washed, 0.0) == washed
+
+
+def test_lift_saturation_preserves_value():
+    washed = colors.parse_color("b59790")
+    lifted = colors.lift_saturation(washed, 0.55)
+    assert max(lifted) == pytest.approx(max(washed), abs=1)

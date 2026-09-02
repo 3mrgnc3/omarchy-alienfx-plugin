@@ -12,7 +12,7 @@ import json
 import os
 import sys
 
-from . import __version__, apiv5, colors, device, engine, gradient, keymap, palette, state
+from . import __version__, apiv5, colors, device, engine, gradient, keymap, lock, palette, state
 
 
 def _fail(message: str, code: int = 2) -> int:
@@ -48,6 +48,8 @@ def _print_plan(work) -> None:
     print(f"effect: {work['effect']}  zones: {', '.join(work['zones'])}")
     for zone, rgb in sorted(work["elc"].items()):
         print(f"  {zone:5s} -> #{colors.to_hex(rgb)}")
+    if work.get("power_programmed"):
+        print(f"  pbtn  -> power-state blocks programmed (#{work['power_programmed']})")
     if work["kbd_leds"] is not None:
         leds = work["kbd_leds"]
         first = colors.to_hex(leds[0][1:]) if leds else "-"
@@ -64,9 +66,22 @@ def _apply(st, zones, args, save=True):
     if getattr(args, "dry_run", False):
         _print_plan(engine.plan(st, zones))
         return 0
-    work = engine.apply(st, zones, persist=getattr(args, "persist", False))
-    if save and not getattr(args, "no_save", False):
-        state.save_state(st)
+
+    fast = getattr(args, "fast", False)
+    try:
+        # A dropped drag frame is invisible - the next one supersedes it - but a
+        # deliberate action should wait its turn rather than vanish.
+        with lock.hardware_lock(wait=0.0 if fast else 3.0, drop_if_busy=fast):
+            work = engine.apply(st, zones,
+                                persist=getattr(args, "persist", False),
+                                fast=fast)
+            if save and not getattr(args, "no_save", False):
+                state.save_state(st)
+    except lock.Busy:
+        if fast:
+            return 0
+        return _fail("hardware is busy; try again", 1)
+
     if getattr(args, "verbose", False):
         _print_plan(work)
     return 0
@@ -108,9 +123,11 @@ def cmd_set(args) -> int:
     """The single mutate-and-apply entry point the plugin uses."""
     st = state.load_state()
 
+    themesync_turned_on = False
     if args.themesync is not None:
         state.set_themesync(_bool_word(args.themesync))
         st["themesync"] = state.themesync_enabled()
+        themesync_turned_on = st["themesync"]
     if args.zonesync is not None:
         st["zonesync"] = _bool_word(args.zonesync)
     if args.effect is not None:
@@ -127,8 +144,23 @@ def cmd_set(args) -> int:
         st["brightness"] = colors.parse_brightness(args.brightness)
     if args.saturation is not None:
         st["saturation"] = max(0.0, float(args.saturation))
+    if args.min_saturation is not None:
+        st["min_saturation"] = max(0.0, min(1.0, float(args.min_saturation)))
 
+    if args.select is not None:
+        if args.select not in device.ZONES:
+            return _fail(f"unknown zone {args.select!r}")
+        st["selected_zone"] = args.select
+
+    # Resolved after --select so a zone change targets the newly selected zone
+    # rather than the previous one.
     zones = _parse_zones(args.zones, st)
+
+    # ThemeSync drives the whole chassis from the theme, so switching it on has
+    # to repaint every zone - not just whichever one the cursor happened to be
+    # sitting on.
+    if themesync_turned_on:
+        zones = list(device.ZONES)
 
     if args.color is not None:
         rgb = colors.parse_color(args.color, palette=_safe_palette())
@@ -142,10 +174,14 @@ def cmd_set(args) -> int:
         if len(zones) == 1:
             st["selected_zone"] = zones[0]
 
-    if args.select is not None:
-        if args.select not in device.ZONES:
-            return _fail(f"unknown zone {args.select!r}")
-        st["selected_zone"] = args.select
+        # Gradient derives every zone from the two anchors, so a colour picked
+        # for one zone would be computed away and the pick would look ignored.
+        # Solid is the only effect that can express per-zone colours, so honour
+        # the pick by switching to it. With zones synced there is a single
+        # colour and gradient can use it as the near anchor, so leave it alone.
+        if (not st.get("zonesync") and args.effect is None
+                and st.get("effect") == "gradient"):
+            st["effect"] = "solid"
 
     # Any manual colour or effect change is a departure from the theme, so it
     # implies ThemeSync off unless the user explicitly asked for it on.
@@ -153,6 +189,15 @@ def cmd_set(args) -> int:
         if st["themesync"]:
             state.set_themesync(False)
             st["themesync"] = False
+
+    # A bare --select only moves the UI cursor. Persist it and stop; repainting
+    # identical colours would just add latency to every zone click.
+    if (args.select is not None and args.color is None and args.effect is None
+            and args.brightness is None and args.themesync is None
+            and args.zonesync is None and args.axis is None
+            and args.speed is None and args.saturation is None):
+        state.save_state(st)
+        return 0
 
     return _apply(st, list(device.ZONES) if st.get("zonesync") else zones, args)
 
@@ -389,6 +434,8 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--no-save", action="store_true", help="apply without updating saved state")
     common.add_argument("--persist", action="store_true",
                         help="also write chassis colours to NVRAM so they survive a cold boot")
+    common.add_argument("--fast", action="store_true",
+                        help="skip power-button state programming (for live drags)")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -400,7 +447,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--color", "-c", help="colour: RRGGBB, #RRGGBB, 'r,g,b', a name, or @themekey")
     p.add_argument("--zones", "-z", default="selected", help="comma list, 'all', or 'selected'")
     p.add_argument("--brightness", "-b", help="0-255 or a percentage like 10%%")
-    p.add_argument("--saturation", type=float, help="saturation multiplier (diffuser compensation)")
+    p.add_argument("--saturation", type=float, help="saturation multiplier (default 1.0, a no-op)")
+    p.add_argument("--min-saturation", dest="min_saturation", type=float,
+                   help="saturation floor 0-1: lifts washed-out theme colours, leaves vivid ones alone")
     p.add_argument("--effect", "-e", choices=engine.EFFECTS)
     p.add_argument("--axis", choices=gradient.AXES)
     p.add_argument("--speed", "-s", choices=sorted(apiv5.SPEED_PRESETS))
