@@ -422,7 +422,21 @@ Panel {
     id: settleTimer
     interval: root.settleMs + 300
     repeat: false
-    onTriggered: root.refresh()
+    onTriggered: {
+      root.refresh()
+      // Also make the change durable. Interactive applies go out --fast, which
+      // writes the power button's colour but not its six NVRAM state blocks -
+      // so it shows the new colour immediately and then reverts at the next
+      // AC/battery/sleep transition. Waiting for the popup to close was not
+      // enough: a user who picks a colour and leaves the panel open loses it on
+      // the next power change.
+      //
+      // Runs as its own process rather than down the stream, so the ~2s write
+      // cannot hold up a drag the user resumes. The hardware lock serialises
+      // them, and a drag frame landing during it drops - invisible, since the
+      // next frame supersedes it.
+      root.commitDurable()
+    }
   }
 
   // Realtime-but-not-wasteful. A chassis write costs ~190ms (the controller's

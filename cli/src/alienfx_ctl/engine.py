@@ -211,11 +211,13 @@ def apply(st, zones=None, persist: bool = False, fast: bool = False) -> dict:
         # stick, and it costs ~2s - so anything the user is actively driving
         # passes fast=True and leaves it to a later commit.
         if not fast and "pbtn" in work["elc"]:
-            target = colors.to_hex(work["elc"]["pbtn"])
-            if st.get("pbtn_programmed") != target:
-                apiv4.program_power_button(elc_fd, work["elc"]["pbtn"])
-                st["pbtn_programmed"] = target
-                work["power_programmed"] = target
+            # apiv4 decides whether the write is needed: it knows what this
+            # process last put in NVRAM. Deliberately not read from saved state
+            # - a fresh process cannot know what the firmware currently holds,
+            # and assuming otherwise left the button reverting at the next
+            # power transition.
+            if apiv4.program_power_button(elc_fd, work["elc"]["pbtn"]):
+                work["power_programmed"] = colors.to_hex(work["elc"]["pbtn"])
 
     def drive_keyboard():
         kbd_fd = fds.get("kbd")

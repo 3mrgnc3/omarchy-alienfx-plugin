@@ -452,3 +452,52 @@ def test_more_colours_than_slots_are_dropped_not_overflowed(monkeypatch):
     frame = [buf for _r, buf in rec.frames if buf[1] == 0x80][0]
     assert frame[9] == apiv5.EFFECT_MAX_COLOURS - 1
     assert len(frame) == apiv5.KBD_REPORT_LEN
+
+
+# ------------------------------------------- power button NVRAM, per process
+
+def test_a_fresh_process_always_programs_the_power_button(monkeypatch):
+    """Whether NVRAM holds a colour is hardware state. A value cached across
+    processes is only an assumption about it - one that survives reboots, power
+    transitions and failed writes alike. Caching it on disk meant the theme
+    hook, `commit` and `restore` each decided NVRAM was current and skipped the
+    write, while the volatile colour write still ran; the button changed and
+    then reverted at the next power transition."""
+    rec = Recorder(); rec.install(monkeypatch, apiv4)
+    apiv4.forget_power_button()
+    assert apiv4.program_power_button(9, (200, 100, 50)) is True
+    assert any(buf[1] == 0x22 for _r, buf in rec.frames), "no NVRAM write"
+
+
+def test_the_same_colour_twice_in_one_process_is_skipped(monkeypatch):
+    """Within a process the guard is sound, and worth having: the write is ~2s."""
+    rec = Recorder(); rec.install(monkeypatch, apiv4)
+    apiv4.forget_power_button()
+    apiv4.program_power_button(9, (200, 100, 50))
+    rec.frames.clear()
+    assert apiv4.program_power_button(9, (200, 100, 50)) is False
+    assert rec.frames == []
+
+
+def test_a_different_colour_programs_again(monkeypatch):
+    rec = Recorder(); rec.install(monkeypatch, apiv4)
+    apiv4.forget_power_button()
+    apiv4.program_power_button(9, (200, 100, 50))
+    assert apiv4.program_power_button(9, (10, 20, 30)) is True
+
+
+def test_force_overrides_the_guard(monkeypatch):
+    rec = Recorder(); rec.install(monkeypatch, apiv4)
+    apiv4.forget_power_button()
+    apiv4.program_power_button(9, (1, 2, 3))
+    assert apiv4.program_power_button(9, (1, 2, 3), force=True) is True
+
+
+def test_the_nvram_cache_is_never_written_to_saved_state(config_root):
+    """The regression guard, matching the one for the keyboard's paint mode."""
+    from alienfx_ctl import state
+    saved = state.load_state()
+    assert "pbtn_programmed" not in saved
+    state.save_state(saved)
+    import json
+    assert "pbtn_programmed" not in json.load(open(state.state_path(), encoding="utf-8"))

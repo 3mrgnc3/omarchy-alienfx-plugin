@@ -121,6 +121,29 @@ def persist(fd: int, zone_colors) -> None:
 # Making a colour stick means programming the six power-state blocks in NVRAM so
 # the firmware's own handler shows the colour we want.
 
+#: The colour this *process* last wrote into the power button's NVRAM blocks.
+#:
+#: Must not be persisted. Whether NVRAM actually holds a given colour is
+#: hardware state, and a value cached on disk is only ever an assumption about
+#: it - one that survives reboots, power transitions and failed writes alike.
+#: Caching it across processes meant a fresh invocation (the theme hook,
+#: `commit`, `restore`) would decide NVRAM was already current and skip the
+#: write, while the volatile setOneColor still ran. The button therefore changed
+#: colour immediately and reverted at the next AC/battery/sleep transition,
+#: which is what "not switching consistently" looked like.
+_last_programmed = None
+
+
+def forget_power_button() -> None:
+    """Force the next call to reprogram, whatever it last wrote."""
+    global _last_programmed
+    _last_programmed = None
+
+
+def last_programmed():
+    return _last_programmed
+
+
 _OP_POWER = 0x22
 _OP_COLOR_SEL = 0x23
 _OP_COLOR_SET = 0x24
@@ -184,8 +207,12 @@ def set_power_state(fd: int, cid: int, zone_id: int, actions,
     elc_send(fd, [0x03, _OP_POWER, 0x00, _SUB_SAVE, 0x00, cid])
 
 
-def program_power_button(fd: int, rgb, zone_id: int = 0x04) -> None:
+def program_power_button(fd: int, rgb, zone_id: int = 0x04, force: bool = False) -> bool:
     """Make a colour stick on the power button across power transitions.
+
+    Returns True if it wrote, False if this process had already written that
+    exact colour. A fresh process always writes: it cannot know what the
+    firmware currently holds.
 
     Programs all six states so the alien head shows the chosen colour on AC and
     on battery, breathes it while charging, fades it out going to sleep, and
@@ -195,8 +222,11 @@ def program_power_button(fd: int, rgb, zone_id: int = 0x04) -> None:
     Costs roughly thirty packets at 20ms each, so this is not something to do on
     every frame of a colour drag; callers pass ``fast`` to skip it.
     """
+    global _last_programmed
     red, green, blue = (max(0, min(255, int(channel))) for channel in rgb)
     user = (red, green, blue)
+    if not force and _last_programmed == user:
+        return False
     # ~15% of the chosen colour, as the far end of the charging breath.
     dim = (red * 40 // 255, green * 40 // 255, blue * 40 // 255)
     dark = (0, 0, 0)
@@ -216,3 +246,5 @@ def program_power_button(fd: int, rgb, zone_id: int = 0x04) -> None:
 
     # Activate the programmed block.
     _control(fd, _SUB_PLAY_ONLY)
+    _last_programmed = user
+    return True

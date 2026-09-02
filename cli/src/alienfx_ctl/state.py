@@ -52,9 +52,6 @@ DEFAULT_STATE = {
     # effects animate between. Empty means "derive one" - the complement of the
     # primary - so an existing install keeps working unchanged.
     "secondary": "",
-    # Last colour written into the power button's NVRAM state blocks. Lets the
-    # engine skip ~30 slow packets when nothing about that zone changed.
-    "pbtn_programmed": "",
     "zones": {
         "kbd": {"color": "ff7800"},
         "tpd": {"color": "ff7800"},
