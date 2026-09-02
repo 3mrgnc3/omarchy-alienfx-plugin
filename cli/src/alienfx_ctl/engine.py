@@ -118,7 +118,7 @@ def plan(st, zones=None) -> dict:
     effect = effective_effect(st)
     result = {"effect": effect, "zones": targets, "kbd_leds": None,
               "kbd_effect": None, "elc": {}, "kbd_solid": None,
-              "kbd_count": 0, "power_programmed": None}
+              "power_programmed": None}
 
     # Which chassis zones exist, and at which protocol ids, is a property of
     # the model - some have fewer, some address them differently - so it comes
@@ -128,9 +128,7 @@ def plan(st, zones=None) -> dict:
     elc_targets = [z for z in targets if z in zone_ids]
 
     if effect == "off":
-        if "kbd" in targets:
-            result["kbd_solid"] = (0, 0, 0)
-            result["kbd_count"] = keymap.led_count(keymap.load())
+        result["kbd_solid"] = (0, 0, 0) if "kbd" in targets else None
         result["elc"] = {zone: (0, 0, 0) for zone in elc_targets}
         return result
 
@@ -147,7 +145,6 @@ def plan(st, zones=None) -> dict:
     if effect == "solid":
         if "kbd" in targets:
             result["kbd_solid"] = _shape(zone_color(st, "kbd"), st)
-            result["kbd_count"] = keymap.led_count(keymap.load())
         result["elc"] = {zone: _shape(zone_color(st, zone), st) for zone in elc_targets}
         return result
 
@@ -234,8 +231,7 @@ def apply(st, zones=None, persist: bool = False, fast: bool = False) -> dict:
             apiv5.firmware_effect(kbd_fd, spec["code"], spec["colours"],
                                   tempo=spec["tempo"])
         elif work["kbd_solid"] is not None:
-            apiv5.solid(kbd_fd, work["kbd_solid"],
-                        count=work["kbd_count"] or apiv5.KBD_LED_COUNT)
+            apiv5.solid(kbd_fd, work["kbd_solid"])
 
     def guarded(fn):
         def run():

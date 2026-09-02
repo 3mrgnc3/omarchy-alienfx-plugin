@@ -192,26 +192,3 @@ def lift_saturation(rgb, minimum: float = 0.0) -> tuple:
         return clamp_rgb(rgb)
     red, green, blue = colorsys.hsv_to_rgb(hue, min(1.0, minimum), val)
     return (round(red * 255), round(green * 255), round(blue * 255))
-
-
-def match_value(rgb, reference, min_saturation_ratio: float = 0.75) -> tuple:
-    """Keep a colour's hue but take its brightness from ``reference``.
-
-    Used to pick the far end of a theme gradient. A theme's most hue-distant
-    entry is often a dark UI colour - `muted`, a selection grey - and using it
-    raw makes the gradient fade to near-black rather than travel through colour,
-    which reads as broken rather than as a gradient. Adopting the reference's
-    value keeps the hue difference (which is the point) and drops the brightness
-    difference (which is not).
-    """
-    hue = hue_of(rgb)
-    sat = saturation_of(rgb)
-    ref_red, ref_green, ref_blue = (c / 255.0 for c in clamp_rgb(reference))
-    _ref_hue, ref_sat, ref_val = colorsys.rgb_to_hsv(ref_red, ref_green, ref_blue)
-    sat = max(sat, ref_sat * min_saturation_ratio)
-    red, green, blue = colorsys.hsv_to_rgb(hue, min(1.0, sat), ref_val)
-    return (round(red * 255), round(green * 255), round(blue * 255))
-
-
-def value_of(rgb) -> float:
-    return max(clamp_rgb(rgb)) / 255.0

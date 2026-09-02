@@ -107,123 +107,12 @@ def test_grid_extent():
     assert gradient.grid_extent(_keymap()["grid_positions"]) == (1, 1)
 
 
-# ------------------------------------------------- full-range LED coverage
-#
-# A painted frame writes only the LEDs it is given and never clears the rest,
-# while apiv5.solid has always written all of them. When render_kbd covered
-# only the mapped keys, any unmapped index kept whatever the last solid paint
-# left on it - which is how single keys ended up stuck on an old colour for as
-# long as the user stayed in gradient mode.
-
-from alienfx_ctl.apiv5 import KBD_LED_COUNT
-
-
-def _sparse_keymap():
-    """Two mapped keys with a deliberate gap, mimicking a wide key's sibling."""
-    return {
-        "key_to_index": {"a": 10, "b": 12},
-        "grid_positions": {"a": {"row": 0, "col": 0}, "b": {"row": 1, "col": 1}},
-    }
-
-
-def test_render_covers_the_keymaps_whole_range():
-    """The two paint paths must agree on how many LEDs exist, or the one that
-    writes fewer leaves stale colour behind. The range is the keymap's own
-    extent - writing past the real end of the strip is wasted at best."""
-    km = _sparse_keymap()          # highest index is 12
-    leds = gradient.render_kbd(km, (255, 0, 0), (0, 0, 255))
-    assert [led[0] for led in leds] == list(range(13))
-
-
-def test_no_index_is_left_unwritten(shipped_keymap):
-    from alienfx_ctl import keymap as keymap_module
-    count = keymap_module.led_count(shipped_keymap)
-    leds = gradient.render_kbd(shipped_keymap, (255, 0, 0), (0, 0, 255))
-    assert {led[0] for led in leds} == set(range(count))
-
-
-def test_the_range_never_exceeds_the_protocol_ceiling():
-    """A keymap claiming a huge index must not make us emit unsendable frames."""
-    km = {"key_to_index": {"a": 0, "b": 5}, "grid_positions": {}}
-    leds = gradient.render_kbd(km, (0, 0, 0), (1, 1, 1), led_count=10_000)
-    assert len(leds) == KBD_LED_COUNT
-
-
-def test_the_reported_stuck_key_is_now_painted(shipped_keymap):
-    """The bug as reported: the backslash key is mapped to 54, but index 55 -
-    its other LED, and the index an older revision of this keymap used for it -
-    was never written by a gradient."""
-    leds = {i: (r, g, b) for i, r, g, b in
-            gradient.render_kbd(shipped_keymap, (255, 0, 0), (0, 0, 255))}
-    assert 55 in leds
-    # 55's only distance-1 mapped neighbour is 54, so it must match exactly.
-    assert leds[55] == leds[54]
-
-
-@pytest.mark.parametrize("gap,owner", [(41, 40), (55, 54), (60, 61), (82, 81), (106, 107)])
-def test_wide_key_siblings_follow_their_key(shipped_keymap, gap, owner):
-    """A wide key sits over more than one LED while the keymap records one.
-    The unmapped sibling has to track the key it physically belongs to."""
-    leds = {i: (r, g, b) for i, r, g, b in
-            gradient.render_kbd(shipped_keymap, (255, 0, 0), (0, 0, 255))}
-    assert leds[gap] == leds[owner]
-
-
-def test_a_filled_index_always_copies_some_mapped_index(shipped_keymap):
-    """Fills are copies of a real key's colour, never invented values."""
-    leds = gradient.render_kbd(shipped_keymap, (255, 0, 0), (0, 0, 255))
-    by_index = {i: (r, g, b) for i, r, g, b in leds}
-    mapped = set(shipped_keymap["key_to_index"].values())
-    palette = {by_index[i] for i in mapped}
-    for index, red, green, blue in leds:
-        assert (red, green, blue) in palette
-
-
-def test_fill_error_against_an_adjacent_key_stays_bounded(shipped_keymap):
-    """Ties resolve to the lower index, which can hand an LED its neighbour's
-    colour rather than its own key's. That is acceptable only while the error
-    stays small; pin the bound so a future change cannot widen it silently."""
-    from alienfx_ctl import keymap as keymap_module
-    by_index = {i: (r, g, b) for i, r, g, b in
-                gradient.render_kbd(shipped_keymap, (0, 0, 0), (255, 255, 255))}
-    mapped = set(shipped_keymap["key_to_index"].values())
-    worst = 0
-    for index in range(keymap_module.led_count(shipped_keymap)):
-        if index in mapped:
-            continue
-        for neighbour in (index - 1, index + 1):
-            if neighbour in mapped:
-                worst = max(worst, max(abs(a - b) for a, b in
-                                       zip(by_index[index], by_index[neighbour])))
-    assert worst <= 48, f"a filled LED is {worst}/255 from an adjacent key"
-
-
-def test_endpoints_survive_the_full_range_fill(shipped_keymap):
-    """Covering unmapped indices must not disturb the anchors."""
-    by_index = {i: (r, g, b) for i, r, g, b in
-                gradient.render_kbd(shipped_keymap, (255, 0, 0), (0, 0, 255))}
-    grid = shipped_keymap["grid_positions"]
-    k2i = shipped_keymap["key_to_index"]
-    top_left = min(k2i, key=lambda k: (grid[k]["row"] + grid[k]["col"]))
-    assert by_index[k2i[top_left]] == (255, 0, 0)
-
-
-def test_led_count_comes_from_the_protocol_module():
-    """Redefining it here is how the two paths drifted apart in the first place."""
-    from alienfx_ctl import apiv5
-    assert gradient.KBD_LED_COUNT is apiv5.KBD_LED_COUNT
-
-
-def test_a_custom_led_count_is_honoured():
-    leds = gradient.render_kbd(_sparse_keymap(), (1, 1, 1), (2, 2, 2), led_count=20)
-    assert [led[0] for led in leds] == list(range(20))
-
-
-@pytest.mark.parametrize("index,expected", [
-    (0, 10), (9, 10), (10, 10), (11, 10), (12, 12), (13, 12), (199, 12),
-])
-def test_nearest_picks_the_closest_mapped_index(index, expected):
-    assert gradient._nearest([10, 12], index) == expected
+# NOTE: an earlier attempt at the stuck-key problem made render_kbd cover every
+# index in the strip, filling unnamed ones from their nearest neighbour. It is
+# reverted: writing distinct colours to indices this keyboard does not have
+# produced uneven, multi-coloured output. apiv5.solid gets away with the full
+# range only because every LED carries the same colour. The tests that pinned
+# that behaviour are gone with it.
 
 
 # ------------------------------------------------- other machines, other zones

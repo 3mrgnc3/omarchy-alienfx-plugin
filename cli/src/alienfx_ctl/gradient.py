@@ -12,10 +12,6 @@ the same axis, which is what makes the whole chassis read as one blend.
 
 from __future__ import annotations
 
-import bisect
-
-from .apiv5 import KBD_LED_COUNT
-
 AXES = ("tl-br", "tr-bl", "lr", "tb")
 DEFAULT_AXIS = "tl-br"
 
@@ -71,70 +67,38 @@ def _row_col(position) -> tuple:
     return int(position[0]), int(position[1])
 
 
-def _nearest(sorted_indices, index: int) -> int:
-    """The mapped index closest to ``index``, preferring the lower on a tie.
-
-    Used to colour LEDs the keymap does not name. See ``render_kbd`` for why
-    index proximity is the right measure on this hardware.
-    """
-    position = bisect.bisect_left(sorted_indices, index)
-    if position == 0:
-        return sorted_indices[0]
-    if position == len(sorted_indices):
-        return sorted_indices[-1]
-    lower, upper = sorted_indices[position - 1], sorted_indices[position]
-    return lower if (index - lower) <= (upper - index) else upper
-
-
-def render_kbd(keymap, first, second, axis: str = DEFAULT_AXIS,
-               led_count: int = 0):
+def render_kbd(keymap, first, second, axis: str = DEFAULT_AXIS):
     """Render the gradient across the keyboard.
 
-    Returns ``(led_index, r, g, b)`` for **every** index this keyboard has,
-    sorted by index, ready to hand to ``apiv5.paint``. ``led_count`` defaults to
-    the keymap's own extent (see ``keymap.led_count``); both paint paths must
-    use the same number or the shorter one leaves stale colour behind.
+    Emits one ``(led_index, r, g, b)`` per key the keymap names, sorted by
+    index, ready for ``apiv5.paint``.
 
-    Covering the whole range is not optional. A painted frame only writes the
-    LEDs it is given and never clears the rest, so an index this function
-    skipped would keep whatever the last full-range paint left on it - for as
-    long as the user stayed in gradient mode. ``apiv5.solid`` has always written
-    all of them, and the two paths disagreeing is exactly how single keys ended
-    up stuck on a colour from a previous setting. ``led_count`` comes from
-    ``apiv5`` so they cannot drift apart again.
+    This paints **only named keys**, which is what the archived implementation
+    did and what works. An earlier attempt at the stuck-key problem expanded
+    this to cover every index in the strip, filling unnamed ones from their
+    nearest neighbour. That was the wrong place to fix it: writing colours to
+    indices this keyboard does not have produced uneven, multi-coloured output.
+    ``apiv5.solid`` gets away with the full range only because every LED in it
+    carries the *same* colour, so any misindexing is invisible - a gradient has
+    no such cover.
 
-    Unmapped indices take the colour of the nearest mapped index. On this
-    hardware that is the physically right answer rather than an approximation:
-    the firmware lays LEDs out in contiguous per-row blocks, and a wide key
-    (tab, backspace, capslock, enter, either shift, space, backslash) sits over
-    two or more adjacent indices while the keymap records only one of them. The
-    fill is what makes a wide key's other LED follow the key it belongs to.
+    The stuck-key problem is a gap in the *data*: a key wider than 1u sits over
+    more than one adjacent LED, and the keymap named only one of them, so the
+    other kept whatever the last flat fill left on it. The fix is to name them
+    (see the ``*_2`` entries in the shipped keymap), which also gives each one
+    its key's exact colour rather than a neighbour's approximation.
 
-    A key with an index but no grid position still lands mid-blend, so an
-    incomplete keymap lights fully rather than leaving holes.
-
-    Where an unmapped index sits equidistant between two mapped ones the lower
-    wins, which can hand it the neighbouring key's colour instead of its own
-    key's. Measured on the reference keymap that costs at most 24/255 per
-    channel at full scale - about 7/255 at the brightness these machines
-    actually run at - because adjacent indices are adjacent on the gradient
-    axis too. Not worth resolving with a cleverer rule: the keymap carries no
-    key-width data to resolve it *correctly*, and a guess that is usually right
-    is worse than a bounded error that always is.
+    A key with an index but no grid position lands mid-blend, so an incomplete
+    keymap still lights fully rather than leaving holes.
     """
     key_to_index = keymap.get("key_to_index") or {}
     grid_positions = keymap.get("grid_positions") or {}
     if not key_to_index:
         raise GradientError("keymap has no key_to_index")
 
-    if not led_count:
-        led_count = max(int(v) for v in key_to_index.values()) + 1
-    # The protocol will not carry more than this however large a keymap claims.
-    led_count = max(1, min(int(led_count), KBD_LED_COUNT))
-
     max_row, max_col = grid_extent(grid_positions) if grid_positions else (0, 0)
 
-    mapped = {}
+    leds = []
     for key, index in key_to_index.items():
         position = grid_positions.get(key)
         if position is None:
@@ -142,18 +106,9 @@ def render_kbd(keymap, first, second, axis: str = DEFAULT_AXIS,
         else:
             row, col = _row_col(position)
             ratio = sample_axis(row, col, max_row, max_col, axis)
-        mapped[int(index)] = lerp_rgb(first, second, ratio)
-
-    if not mapped:
-        raise GradientError("keymap produced no usable LED indices")
-
-    known = sorted(mapped)
-    leds = []
-    for index in range(int(led_count)):
-        colour = mapped.get(index)
-        if colour is None:
-            colour = mapped[_nearest(known, index)]
-        leds.append((index, colour[0], colour[1], colour[2]))
+        red, green, blue = lerp_rgb(first, second, ratio)
+        leds.append((int(index), red, green, blue))
+    leds.sort(key=lambda led: led[0])
     return leds
 
 
