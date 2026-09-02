@@ -11,7 +11,8 @@ from __future__ import annotations
 import json
 import os
 
-from . import state
+from . import hardware, state
+from .apiv5 import KBD_LED_COUNT
 
 SHIPPED_KEYMAP = os.path.join(os.path.dirname(__file__), "data", "m16r2-keymap.json")
 
@@ -23,12 +24,62 @@ class KeymapError(RuntimeError):
     """Raised when a keymap is missing or malformed."""
 
 
-def user_keymap_path() -> str:
+def model_keymap_path(model: str = "") -> str:
+    """Where this machine's keymap belongs, named after its model.
+
+    Per-model rather than a single ``keymap.json`` because zone layouts and LED
+    counts differ between Alienware models, and a user may move a config
+    directory between machines. The generic name is still honoured on read for
+    installs that predate this.
+    """
+    return os.path.join(state.keymap_dir(), hardware.keymap_filename(model))
+
+
+def legacy_keymap_path() -> str:
     return os.path.join(state.keymap_dir(), "keymap.json")
 
 
+def user_keymap_path() -> str:
+    """The keymap this machine should use, preferring its model-specific file."""
+    model_path = model_keymap_path()
+    if os.path.isfile(model_path):
+        return model_path
+    if os.path.isfile(legacy_keymap_path()):
+        return legacy_keymap_path()
+    return model_path
+
+
 def has_user_keymap() -> bool:
-    return os.path.isfile(user_keymap_path())
+    return os.path.isfile(model_keymap_path()) or os.path.isfile(legacy_keymap_path())
+
+
+def discover_keymaps():
+    """Every keymap file we can offer the user, newest-looking first.
+
+    Looks in the keymap directory and beside the package, so the shipped
+    reference map and anything the user dropped in are both offered.
+    """
+    seen, found = set(), []
+    directories = [state.keymap_dir(), os.path.dirname(SHIPPED_KEYMAP)]
+    for directory in directories:
+        try:
+            names = sorted(os.listdir(directory))
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(".json"):
+                continue
+            path = os.path.join(directory, name)
+            real = os.path.realpath(path)
+            if real in seen or not os.path.isfile(path):
+                continue
+            seen.add(real)
+            try:
+                data = load_file(path)
+            except KeymapError:
+                continue
+            found.append((path, data))
+    return found
 
 
 def validate(data) -> dict:
@@ -88,16 +139,62 @@ def load() -> dict:
     raise KeymapError("no keymap available - run 'alienfx-ctl keymap wizard'")
 
 
-def import_file(source: str) -> str:
-    """Validate a keymap file and install it as the user's keymap."""
+def import_file(source: str, model: str = "") -> str:
+    """Validate a keymap file and install it as this machine's keymap."""
     data = load_file(source)
-    target = user_keymap_path()
+    target = model_keymap_path(model)
     state.ensure_dirs()
     state.write_json_atomic(target, data)
     return target
 
 
+def zones(data=None) -> dict:
+    """The chassis zone map for this machine.
+
+    Zone layouts differ by model - some have fewer zones, some address them at
+    different protocol ids - so a keymap may carry its own ``zones`` block. The
+    built-in map is the fallback, and is correct for the reference machine.
+    """
+    from . import device
+    if data is None:
+        try:
+            data = load()
+        except KeymapError:
+            return dict(device.ELC_ZONES)
+    declared = (data or {}).get("zones")
+    if not isinstance(declared, dict) or not declared:
+        return dict(device.ELC_ZONES)
+    out = {}
+    for name, ids in declared.items():
+        if not isinstance(name, str):
+            continue
+        if isinstance(ids, int):
+            ids = [ids]
+        if isinstance(ids, (list, tuple)) and all(isinstance(i, int) for i in ids):
+            out[str(name)] = [int(i) for i in ids]
+    return out or dict(device.ELC_ZONES)
+
+
+def led_count(data) -> int:
+    """How many LED indices this keyboard actually has.
+
+    Derived from the keymap rather than assumed, because it differs by model.
+    ``KBD_LED_COUNT`` is only the ceiling the protocol allows; a given keyboard
+    populates some prefix of it. Writing past the real end is wasted packets at
+    best, and there is no reason to believe the controller ignores it cleanly.
+
+    Both paint paths must use this same number: when they disagreed, the path
+    that wrote fewer left stale colour behind on the difference.
+    """
+    indices = [int(v) for v in (data.get("key_to_index") or {}).values()]
+    if not indices:
+        return KBD_LED_COUNT
+    return max(1, min(KBD_LED_COUNT, max(indices) + 1))
+
+
 def describe(data) -> str:
-    device = data.get("device", "unknown device")
+    name = data.get("device", "unknown device")
     total = data.get("total_mapped") or len(data.get("key_to_index", {}))
-    return f"{device}: {total} keys mapped"
+    zone_names = sorted(zones(data))
+    return (f"{name}: {total} keys mapped, {len(zone_names)} chassis zone"
+            f"{'' if len(zone_names) == 1 else 's'} ({', '.join(zone_names)})")

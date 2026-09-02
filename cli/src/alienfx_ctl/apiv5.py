@@ -35,15 +35,18 @@ _LEDS_PER_PACKET = 15
 # reset, and getting that wrong is how you end up with a dark keyboard that
 # only a reboot clears.
 #
-# FRAME_SETTLE is per colour packet, and a full-range paint is 14 of them, so it
-# is the one that compounds. The ioctl itself already blocks ~2.6ms, so 1ms here
-# still leaves a real gap between packets. The command *sequence* is deliberately
-# not shortened any further than the conditional clean_switch: a partial APIv5
-# sequence leaves the controller dark until a reboot, and that is not a trade
-# worth a few milliseconds.
+# FRAME_SETTLE is per colour packet and compounds across a frame. It was briefly
+# cut to 1ms; that is reverted. A dropped colour packet is *invisible* under a
+# flat fill (every packet carries the same colour) but shows as a block of stale
+# keys under a gradient, so the pacing that "tested fine" against solid was
+# never actually being tested. 14ms of frame time is not worth that risk.
+#
+# The command *sequence* is likewise not shortened beyond the conditional
+# clean_switch: a partial APIv5 sequence leaves the controller dark until a
+# reboot.
 _RESET_SETTLE = 0.05
 _STEP_SETTLE = 0.01
-_FRAME_SETTLE = 0.001
+_FRAME_SETTLE = 0.002
 
 _CMD_EFFECT = 0x80
 _CMD_TURN_ON_SET = 0x83
@@ -171,22 +174,39 @@ def off(fd: int, count: int = KBD_LED_COUNT) -> None:
     paint(fd, [(i, 0, 0, 0) for i in range(count)])
 
 
-def firmware_effect(fd: int, effect: int, rgb, tempo: int = 60, colours: int = 1) -> None:
+#: The effect frame carries three RGB slots, which is also why three colours
+#: gives a rainbow wave. Anything beyond that is dropped rather than overflowing
+#: the frame.
+EFFECT_MAX_COLOURS = 3
+
+
+def firmware_effect(fd: int, effect: int, colours, tempo: int = 60) -> None:
     """Hand an animation to the controller so it runs without the host.
+
+    ``colours`` is a single ``(r, g, b)`` or a sequence of up to three. The
+    count goes on the wire as ``n - 1``, which is the same field that turns a
+    single-colour wave into a rainbow at three - so two colours asks the
+    firmware to animate between exactly those two.
 
     Deliberately does not clean-switch first; that would strobe.
     """
-    red, green, blue = (max(0, min(255, int(channel))) for channel in rgb)
+    if colours and not isinstance(colours[0], (list, tuple)):
+        colours = [colours]
+    triplets = [tuple(max(0, min(255, int(c))) for c in colour)
+                for colour in list(colours)[:EFFECT_MAX_COLOURS]] or [(0, 0, 0)]
+
+    payload = [
+        _CMD_EFFECT, int(effect), max(1, min(255, int(tempo))),
+        0x00, 0x00, 0x01, 0x01, 0x01,
+        len(triplets) - 1,
+    ]
+    for red, green, blue in triplets:
+        payload += [red, green, blue]
+    # Keep the frame the same length regardless of how many colours are in use;
+    # the firmware reads the slot count from the field above.
+    payload += [0x00, 0x00, 0x00] * (EFFECT_MAX_COLOURS - len(triplets))
+
     reset(fd)
-    kbd_send(
-        fd,
-        [
-            _CMD_EFFECT, int(effect), max(1, min(255, int(tempo))),
-            0x00, 0x00, 0x01, 0x01, 0x01,
-            max(0, int(colours) - 1),
-            red, green, blue,
-            0x00, 0x00, 0x00,
-        ],
-    )
+    kbd_send(fd, payload)
     time.sleep(_STEP_SETTLE)
     update(fd)

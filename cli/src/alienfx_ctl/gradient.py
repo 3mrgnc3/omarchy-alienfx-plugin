@@ -87,11 +87,13 @@ def _nearest(sorted_indices, index: int) -> int:
 
 
 def render_kbd(keymap, first, second, axis: str = DEFAULT_AXIS,
-               led_count: int = KBD_LED_COUNT):
+               led_count: int = 0):
     """Render the gradient across the keyboard.
 
-    Returns ``(led_index, r, g, b)`` for **every** index the controller accepts,
-    sorted by index, ready to hand to ``apiv5.paint``.
+    Returns ``(led_index, r, g, b)`` for **every** index this keyboard has,
+    sorted by index, ready to hand to ``apiv5.paint``. ``led_count`` defaults to
+    the keymap's own extent (see ``keymap.led_count``); both paint paths must
+    use the same number or the shorter one leaves stale colour behind.
 
     Covering the whole range is not optional. A painted frame only writes the
     LEDs it is given and never clears the rest, so an index this function
@@ -125,6 +127,11 @@ def render_kbd(keymap, first, second, axis: str = DEFAULT_AXIS,
     if not key_to_index:
         raise GradientError("keymap has no key_to_index")
 
+    if not led_count:
+        led_count = max(int(v) for v in key_to_index.values()) + 1
+    # The protocol will not carry more than this however large a keymap claims.
+    led_count = max(1, min(int(led_count), KBD_LED_COUNT))
+
     max_row, max_col = grid_extent(grid_positions) if grid_positions else (0, 0)
 
     mapped = {}
@@ -150,9 +157,24 @@ def render_kbd(keymap, first, second, axis: str = DEFAULT_AXIS,
     return leds
 
 
-def elc_samples(first, second) -> dict:
-    """Return ``{zone: rgb}`` for the three chassis zones."""
-    return {
-        zone: lerp_rgb(first, second, ratio)
-        for zone, ratio in ELC_ANCHORS.items()
-    }
+def elc_samples(first, second, zone_names=None) -> dict:
+    """Return ``{zone: rgb}`` for a machine's chassis zones.
+
+    ``ELC_ANCHORS`` gives the reference machine's three zones fixed points on
+    the axis, which is what makes the chassis read as part of one blend. A model
+    with a different set of zones gets them spread evenly instead, since there
+    is nothing model-specific to anchor them to.
+    """
+    if not zone_names:
+        return {zone: lerp_rgb(first, second, ratio)
+                for zone, ratio in ELC_ANCHORS.items()}
+
+    names = list(zone_names)
+    if all(name in ELC_ANCHORS for name in names):
+        return {name: lerp_rgb(first, second, ELC_ANCHORS[name]) for name in names}
+
+    if len(names) == 1:
+        return {names[0]: lerp_rgb(first, second, 0.5)}
+    step = 1.0 / (len(names) - 1)
+    return {name: lerp_rgb(first, second, index * step)
+            for index, name in enumerate(names)}

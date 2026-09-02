@@ -88,3 +88,25 @@ def test_user_keymap_wins_over_the_shipped_one(config_root, tmp_path):
 def test_load_falls_back_to_shipped(config_root):
     assert keymap.has_user_keymap() is False
     assert keymap.load()["key_to_index"]
+
+
+def test_led_count_is_the_keymaps_extent():
+    """Both paint paths derive their range from this, so it has to be exact."""
+    assert keymap.led_count({"key_to_index": {"a": 0, "b": 12}}) == 13
+    assert keymap.led_count({"key_to_index": {"a": 5}}) == 6
+
+
+def test_led_count_of_the_real_keymap():
+    data = keymap.load_file(keymap.SHIPPED_KEYMAP)
+    # highest named index on the reference keyboard is 159
+    assert keymap.led_count(data) == 160
+
+
+def test_led_count_is_clamped_to_the_protocol_ceiling():
+    from alienfx_ctl.apiv5 import KBD_LED_COUNT
+    assert keymap.led_count({"key_to_index": {"a": 99999}}) == KBD_LED_COUNT
+
+
+def test_led_count_falls_back_when_nothing_is_mapped():
+    from alienfx_ctl.apiv5 import KBD_LED_COUNT
+    assert keymap.led_count({}) == KBD_LED_COUNT

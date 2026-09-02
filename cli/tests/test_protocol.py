@@ -169,7 +169,7 @@ def test_firmware_effect_does_not_clean_switch_first(monkeypatch):
 
 def test_firmware_effect_payload(monkeypatch):
     rec = Recorder(); rec.install(monkeypatch, apiv5)
-    apiv5.firmware_effect(4, apiv5.EFFECT_NIGHTRIDER, (0x0A, 0x0B, 0x0C), tempo=55, colours=1)
+    apiv5.firmware_effect(4, apiv5.EFFECT_NIGHTRIDER, (0x0A, 0x0B, 0x0C), tempo=55)
     effect = [buf for _r, buf in rec.frames if buf[1] == 0x80][0]
     assert effect[2] == apiv5.EFFECT_NIGHTRIDER == 10
     assert effect[3] == 55
@@ -369,3 +369,45 @@ def test_keyboard_pacing_is_smaller_than_the_chassis():
     pacing them identically made a repaint mostly sleep."""
     assert apiv5._FRAME_SETTLE < apiv5._STEP_SETTLE < apiv5._RESET_SETTLE
     assert apiv5._STEP_SETTLE <= apiv4.ELC_PACKET_DELAY * 2
+
+
+def test_effect_carries_two_colours(monkeypatch):
+    """Wave/Pulse/Nightrider animate between two chosen colours by using the
+    same slot-count field that turns a single-colour wave into a rainbow at
+    three. Two colours means count field 1 and two triplets."""
+    rec = Recorder(); rec.install(monkeypatch, apiv5)
+    apiv5.firmware_effect(4, apiv5.EFFECT_WAVE, [(255, 0, 0), (0, 0, 255)], tempo=40)
+    frame = [buf for _r, buf in rec.frames if buf[1] == 0x80][0]
+    assert frame[9] == 1, "count field must be n-1"
+    assert frame[10:13] == bytes([255, 0, 0])
+    assert frame[13:16] == bytes([0, 0, 255])
+
+
+def test_a_single_colour_still_sends_the_original_frame(monkeypatch):
+    """The one-colour case must be byte-identical to before, or every existing
+    effect changes behaviour."""
+    rec = Recorder(); rec.install(monkeypatch, apiv5)
+    apiv5.firmware_effect(4, apiv5.EFFECT_WAVE, (255, 0, 0), tempo=40)
+    frame = [buf for _r, buf in rec.frames if buf[1] == 0x80][0]
+    assert frame[9] == 0
+    assert frame[10:13] == bytes([255, 0, 0])
+    assert frame[13:19] == bytes(6), "unused slots stay zeroed"
+
+
+def test_effect_frame_length_is_constant_regardless_of_colour_count(monkeypatch):
+    rec = Recorder(); rec.install(monkeypatch, apiv5)
+    apiv5.firmware_effect(4, apiv5.EFFECT_WAVE, (1, 2, 3))
+    one = [buf for _r, buf in rec.frames if buf[1] == 0x80][0]
+    rec.frames.clear()
+    apiv5.firmware_effect(4, apiv5.EFFECT_WAVE, [(1, 2, 3), (4, 5, 6), (7, 8, 9)])
+    three = [buf for _r, buf in rec.frames if buf[1] == 0x80][0]
+    assert len(one) == len(three) == apiv5.KBD_REPORT_LEN
+
+
+def test_more_colours_than_slots_are_dropped_not_overflowed(monkeypatch):
+    rec = Recorder(); rec.install(monkeypatch, apiv5)
+    apiv5.firmware_effect(4, apiv5.EFFECT_WAVE,
+                          [(1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5)])
+    frame = [buf for _r, buf in rec.frames if buf[1] == 0x80][0]
+    assert frame[9] == apiv5.EFFECT_MAX_COLOURS - 1
+    assert len(frame) == apiv5.KBD_REPORT_LEN

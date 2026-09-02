@@ -34,13 +34,16 @@ _THEME_NAMES = (
 
 _HEX_VALUE_RE = re.compile(r"^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$")
 
-#: Palette keys worth considering as the far end of a gradient, best first.
-#: Deliberately excludes foreground/background so the blend stays chromatic.
+#: Palette keys worth considering as the far end of a gradient.
+#:
+#: Deliberately excludes foreground/background so the blend stays chromatic, and
+#: excludes `selection`/`muted` because those are UI chrome rather than palette
+#: colours - they are usually dark greys, and on some themes one of them is the
+#: most hue-distant entry, which produced a "gradient" that just faded to black.
 _SECONDARY_CANDIDATES = (
-    "cyan", "magenta", "blue", "green", "red", "yellow",
+    "cyan", "magenta", "blue", "green", "red", "yellow", "orange",
     "bright_cyan", "bright_magenta", "bright_blue",
     "bright_green", "bright_red", "bright_yellow",
-    "selection", "muted",
 )
 
 
@@ -164,13 +167,11 @@ def auto_secondary(palette, primary) -> tuple:
 
     # A near-monochrome theme yields no distant hue; synthesise a complement.
     if best is None or best_distance < 0.06:
-        red, green, blue = (channel / 255.0 for channel in primary)
-        hue, sat, val = colorsys.rgb_to_hsv(red, green, blue)
-        hue = (hue + 0.5) % 1.0
-        sat = max(sat, 0.35)
-        red, green, blue = colorsys.hsv_to_rgb(hue, sat, val)
-        return (round(red * 255), round(green * 255), round(blue * 255))
-    return best
+        return colors.complement(primary)
+
+    # Take the hue, not the brightness. A dark palette entry used raw makes the
+    # gradient fade towards black instead of travelling through colour.
+    return colors.match_value(best, primary)
 
 
 def anchors():

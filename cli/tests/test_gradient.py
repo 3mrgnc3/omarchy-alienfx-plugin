@@ -126,17 +126,27 @@ def _sparse_keymap():
     }
 
 
-def test_render_covers_every_index_the_controller_accepts():
+def test_render_covers_the_keymaps_whole_range():
     """The two paint paths must agree on how many LEDs exist, or the one that
-    writes fewer leaves stale colour behind."""
-    leds = gradient.render_kbd(_sparse_keymap(), (255, 0, 0), (0, 0, 255))
-    assert [led[0] for led in leds] == list(range(KBD_LED_COUNT))
+    writes fewer leaves stale colour behind. The range is the keymap's own
+    extent - writing past the real end of the strip is wasted at best."""
+    km = _sparse_keymap()          # highest index is 12
+    leds = gradient.render_kbd(km, (255, 0, 0), (0, 0, 255))
+    assert [led[0] for led in leds] == list(range(13))
 
 
 def test_no_index_is_left_unwritten(shipped_keymap):
+    from alienfx_ctl import keymap as keymap_module
+    count = keymap_module.led_count(shipped_keymap)
     leds = gradient.render_kbd(shipped_keymap, (255, 0, 0), (0, 0, 255))
-    written = {led[0] for led in leds}
-    assert written == set(range(KBD_LED_COUNT))
+    assert {led[0] for led in leds} == set(range(count))
+
+
+def test_the_range_never_exceeds_the_protocol_ceiling():
+    """A keymap claiming a huge index must not make us emit unsendable frames."""
+    km = {"key_to_index": {"a": 0, "b": 5}, "grid_positions": {}}
+    leds = gradient.render_kbd(km, (0, 0, 0), (1, 1, 1), led_count=10_000)
+    assert len(leds) == KBD_LED_COUNT
 
 
 def test_the_reported_stuck_key_is_now_painted(shipped_keymap):
@@ -173,11 +183,12 @@ def test_fill_error_against_an_adjacent_key_stays_bounded(shipped_keymap):
     """Ties resolve to the lower index, which can hand an LED its neighbour's
     colour rather than its own key's. That is acceptable only while the error
     stays small; pin the bound so a future change cannot widen it silently."""
+    from alienfx_ctl import keymap as keymap_module
     by_index = {i: (r, g, b) for i, r, g, b in
                 gradient.render_kbd(shipped_keymap, (0, 0, 0), (255, 255, 255))}
     mapped = set(shipped_keymap["key_to_index"].values())
     worst = 0
-    for index in range(KBD_LED_COUNT):
+    for index in range(keymap_module.led_count(shipped_keymap)):
         if index in mapped:
             continue
         for neighbour in (index - 1, index + 1):
@@ -213,3 +224,32 @@ def test_a_custom_led_count_is_honoured():
 ])
 def test_nearest_picks_the_closest_mapped_index(index, expected):
     assert gradient._nearest([10, 12], index) == expected
+
+
+# ------------------------------------------------- other machines, other zones
+
+def test_elc_samples_uses_the_reference_anchors_by_default():
+    samples = gradient.elc_samples((255, 0, 0), (0, 0, 255))
+    assert samples["logo"] == (255, 0, 0)
+    assert samples["pbtn"] == (0, 0, 255)
+    assert samples["tpd"] == (128, 0, 128)
+
+
+def test_elc_samples_honours_a_named_subset():
+    """A model with fewer zones must not be handed samples for zones it lacks."""
+    samples = gradient.elc_samples((255, 0, 0), (0, 0, 255), ["logo", "tpd"])
+    assert set(samples) == {"logo", "tpd"}
+
+
+def test_elc_samples_spreads_unknown_zone_names_evenly():
+    """An unfamiliar zone set has nothing model-specific to anchor to, so it
+    gets spread across the axis rather than defaulting to one end."""
+    samples = gradient.elc_samples((0, 0, 0), (255, 255, 255), ["a", "b", "c"])
+    assert samples["a"] == (0, 0, 0)
+    assert samples["b"] == (128, 128, 128)
+    assert samples["c"] == (255, 255, 255)
+
+
+def test_elc_samples_with_a_single_zone_lands_mid_blend():
+    samples = gradient.elc_samples((0, 0, 0), (255, 255, 255), ["only"])
+    assert samples["only"] == (128, 128, 128)

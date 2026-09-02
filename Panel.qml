@@ -67,10 +67,22 @@ Panel {
   property string uiProfile: ""
   property int uiBrightness: 26
 
-  // Picker channels, also locally owned.
+  // The gradient range: two ends, each its own swatch. "a" is the near end and
+  // the only one Solid uses.
+  property string uiColorA: "ff7800"
+  property string uiColorB: ""
+  property string pickTarget: "a"
+
+  // Picker channels, mirroring whichever end is being edited.
   property int pickR: 255
   property int pickG: 120
   property int pickB: 0
+
+  // Solid is a single flat colour, so the far end has nothing to mean.
+  readonly property bool rangeUsable: root.uiEffect !== "solid"
+  readonly property color previewA: Model.hexColor(root.uiColorA)
+  readonly property color previewB: Model.hexColor(root.uiColorB !== "" ? root.uiColorB
+                                                  : Model.complementHex(root.uiColorA))
 
   // While the user is driving, an in-flight state read must not overwrite what
   // they just set. Any local edit marks a settling window; reconciliation waits
@@ -82,6 +94,8 @@ Panel {
 
   // True while any slider is under the pointer. Reconciliation must never move
   // a control the user is physically holding.
+  readonly property bool hasRange: root.uiColorB !== "" && root.uiColorB !== root.uiColorA
+
   readonly property bool anyDragging: brightnessSlider.dragging
     || redSlider.dragging || greenSlider.dragging || blueSlider.dragging
 
@@ -149,6 +163,11 @@ Panel {
     }
   }
 
+  function runWizard() {
+    Quickshell.execDetached([root.wizardPath])
+    root.close()
+  }
+
   function runSetup() {
     // The udev step needs root, so this has to happen in a terminal where sudo
     // (or pkexec) can prompt - not silently from the shell process.
@@ -204,14 +223,32 @@ Panel {
       root.uiProfile = reported
     }
     if (s.brightness !== undefined) root.uiBrightness = s.brightness
-    loadPickerFromZone(root.uiZone)
+    root.uiColorA = Model.zoneHex(s, root.uiZone)
+    root.uiColorB = s.secondary ? String(s.secondary) : ""
+    loadPickerFromTarget()
   }
 
   function loadPickerFromZone(zone) {
-    var rgb = Model.hexToRgb(Model.zoneHex(root.st, zone))
+    root.uiColorA = Model.zoneHex(root.st, zone)
+    root.pickTarget = "a"
+    loadPickerFromTarget()
+  }
+
+  // Point the RGB sliders at whichever end of the range is being edited.
+  function loadPickerFromTarget() {
+    var hex = root.pickTarget === "b"
+      ? (root.uiColorB !== "" ? root.uiColorB : Model.complementHex(root.uiColorA))
+      : root.uiColorA
+    var rgb = Model.hexToRgb(hex)
     root.pickR = rgb.r
     root.pickG = rgb.g
     root.pickB = rgb.b
+  }
+
+  function editEnd(which) {
+    root.pickTarget = which
+    root.pickerOpen = true
+    loadPickerFromTarget()
   }
 
   property bool streamReady: false
@@ -261,7 +298,16 @@ Panel {
   // and drop rather than queue if the hardware is busy.
   function applyPickedColor(live) {
     var hex = Model.rgbToHex(root.pickR, root.pickG, root.pickB)
-    var args = ["set", "--zones", colorTargets(live), "--color", hex, "--fast"]
+    var args
+    if (root.pickTarget === "b") {
+      root.uiColorB = hex
+      // The far end is a property of the range, not of a zone, so it is not
+      // sent with --zones.
+      args = ["set", "--color2", hex, "--fast"]
+    } else {
+      root.uiColorA = hex
+      args = ["set", "--zones", colorTargets(live), "--color", hex, "--fast"]
+    }
     // An intermediate frame may be dropped if the hardware is busy; the value
     // the user settles on may not, or saved state ends up behind the UI.
     if (live) args.push("--drop-if-busy")
@@ -499,7 +545,8 @@ Panel {
             id: heroText
             anchors.left: heroIcon.right
             anchors.leftMargin: Style.space(13)
-            anchors.right: parent.right
+            anchors.right: wizardIcon.left
+            anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(2)
 
@@ -514,6 +561,7 @@ Panel {
             }
 
             Text {
+              id: heroStatus
               text: {
                 if (root.setupNeeded) return root.cliResolved ? "NO DEVICE ACCESS" : "SETUP REQUIRED"
                 if (root.errorText !== "") return "ERROR"
@@ -530,6 +578,20 @@ Panel {
               elide: Text.ElideRight
               width: parent.width
             }
+          }
+
+          // Always reachable, not just on first run: re-running the wizard is
+          // how you repair or replace a keymap, and hiding that behind "only
+          // when none exists" made it a one-shot.
+          PanelActionButton {
+            id: wizardIcon
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: Model.ICON.keyboard
+            tooltipText: "KeyMap Wizard"
+            foreground: root.fg
+            fontFamily: root.fontFamily
+            onClicked: root.runWizard()
           }
         }
 
@@ -610,10 +672,7 @@ Panel {
           bordered: true
           leftAlign: true
           verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
-          onClicked: {
-            Quickshell.execDetached([root.wizardPath])
-            root.close()
-          }
+          onClicked: root.runWizard()
         }
 
         PanelSeparator { foreground: root.fg; visible: root.loaded }
@@ -745,44 +804,43 @@ Panel {
           spacing: Style.space(7)
 
           PanelSectionHeader {
-            text: root.zonesync ? "COLOUR - ALL ZONES"
-                                : "COLOUR - " + (Model.ZONE_LABELS[root.selectedZone] || "").toUpperCase()
+            text: {
+              var scope = root.zonesync ? "ALL ZONES"
+                        : (Model.ZONE_LABELS[root.uiZone] || "").toUpperCase()
+              return (root.rangeUsable ? "COLOUR RANGE - " : "COLOUR - ") + scope
+            }
             foreground: root.fg
             fontFamily: root.fontFamily
           }
 
-          // Click the swatch to reveal the channel sliders, per the "picker
-          // displays on element click" behaviour.
-          Item {
+          // Both ends of the range on one row. Clicking a swatch points the
+          // sliders at that end; Solid hides the far end entirely, since a flat
+          // colour has no second end to set.
+          Row {
             width: parent.width
-            implicitHeight: Style.spacing.controlHeight
+            spacing: Style.space(8)
 
-            Rectangle {
-              id: swatch
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(46)
-              height: Style.spacing.controlHeight
-              radius: Style.cornerRadius > 0 ? Style.cornerRadius : 3
-              // Content, not chrome: the actual colour on the hardware.
-              color: root.previewColor
-              border.width: Math.max(1, Style.normalBorderWidth)
-              border.color: Style.normalBorderColor
-              Behavior on color { ColorAnimation { duration: 140 } }
+            SwatchButton {
+              id: swatchA
+              label: root.rangeUsable ? "FROM" : "COLOUR"
+              hex: root.uiColorA
+              shade: root.previewA
+              active: root.pickTarget === "a"
+              onPicked: root.editEnd("a")
             }
 
-            Text {
-              anchors.left: swatch.right
-              anchors.leftMargin: Style.space(11)
-              anchors.verticalCenter: parent.verticalCenter
-              text: "#" + Model.rgbToHex(root.pickR, root.pickG, root.pickB)
-              color: root.fg
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
+            SwatchButton {
+              id: swatchB
+              visible: root.rangeUsable
+              label: "TO"
+              hex: root.uiColorB !== "" ? root.uiColorB : Model.complementHex(root.uiColorA)
+              shade: root.previewB
+              active: root.pickTarget === "b"
+              derived: root.uiColorB === ""
+              onPicked: root.editEnd("b")
             }
 
             Button {
-              anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               text: root.pickerOpen ? "Done" : "Pick"
               fontSize: Style.font.bodySmall
@@ -792,15 +850,16 @@ Panel {
               bordered: true
               onClicked: root.pickerOpen = !root.pickerOpen
             }
+          }
 
-            MouseArea {
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-              width: swatch.width
-              height: swatch.height
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.pickerOpen = !root.pickerOpen
-            }
+          Text {
+            visible: root.rangeUsable && root.uiColorB === ""
+            width: parent.width
+            text: "The far end is derived from the first colour until you set it."
+            color: Qt.darker(root.fg, 1.45)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
 
           Column {
@@ -1019,6 +1078,63 @@ Panel {
         horizontalPadding: Math.round(Style.spacing.controlPaddingX * 0.75)
         onClicked: chipRow.picked(String(modelData.value))
       }
+    }
+  }
+
+  // One end of the colour range: a swatch showing the actual light colour with
+  // its hex beneath. The fill is content, not chrome - it depicts what is being
+  // sent to the hardware - so it is the one literal colour in the panel.
+  component SwatchButton: Item {
+    id: swatch
+    property string label: ""
+    property string hex: "000000"
+    property color shade: "black"
+    property bool active: false
+    property bool derived: false
+    signal picked()
+
+    implicitWidth: Style.space(92)
+    implicitHeight: column.implicitHeight
+    anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+
+    Column {
+      id: column
+      width: parent.width
+      spacing: Style.space(3)
+
+      Text {
+        text: swatch.label
+        color: Qt.darker(root.fg, swatch.active ? 1.0 : 1.5)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: swatch.active
+        font.letterSpacing: 1.0
+      }
+
+      Rectangle {
+        width: parent.width
+        height: Style.spacing.controlHeight
+        radius: Style.cornerRadius > 0 ? Style.cornerRadius : 3
+        color: swatch.shade
+        opacity: swatch.derived ? 0.55 : 1.0
+        border.width: swatch.active ? Math.max(2, Style.selectedBorderWidth + 1)
+                                    : Math.max(1, Style.normalBorderWidth)
+        border.color: swatch.active ? Color.accent : Style.normalBorderColor
+        Behavior on color { ColorAnimation { duration: 140 } }
+      }
+
+      Text {
+        text: "#" + swatch.hex
+        color: Qt.darker(root.fg, 1.3)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      onClicked: swatch.picked()
     }
   }
 

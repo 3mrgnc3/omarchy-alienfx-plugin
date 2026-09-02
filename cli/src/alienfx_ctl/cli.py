@@ -58,7 +58,8 @@ def _print_plan(work) -> None:
         print(f"  kbd   -> {len(leds)} keys, #{first} .. #{last}")
     elif work["kbd_effect"] is not None:
         spec = work["kbd_effect"]
-        print(f"  kbd   -> firmware effect {spec['code']} #{colors.to_hex(spec['rgb'])} tempo {spec['tempo']}")
+        shades = " -> ".join("#" + colors.to_hex(c) for c in spec["colours"])
+        print(f"  kbd   -> firmware effect {spec['code']} {shades} tempo {spec['tempo']}")
     elif work["kbd_solid"] is not None:
         print(f"  kbd   -> #{colors.to_hex(work['kbd_solid'])} (all keys)")
 
@@ -121,6 +122,9 @@ def cmd_state(args) -> int:
     print(f"themesync   : {'on' if st['themesync'] else 'off'}")
     print(f"zonesync    : {'on' if st['zonesync'] else 'off'}")
     print(f"effect      : {engine.effective_effect(st)}")
+    _second = engine.secondary_color(st)
+    print(f"range       : #{colors.to_hex(engine.zone_color(st, 'kbd'))}"
+          + (f" -> #{colors.to_hex(_second)}" if _second else " -> (derived complement)"))
     print(f"brightness  : {st['brightness']} ({round(st['brightness'] / 255 * 100)}%)")
     print(f"profile     : {state.current_profile() or '(none)'}")
     print(f"keymap      : {'user' if keymap.has_user_keymap() else 'shipped default'}")
@@ -152,6 +156,12 @@ def cmd_set(args) -> int:
         st["speed"] = args.speed
     if args.brightness is not None:
         st["brightness"] = colors.parse_brightness(args.brightness)
+    if args.color2 is not None:
+        if args.color2.strip() == "":
+            st["secondary"] = ""
+        else:
+            st["secondary"] = colors.to_hex(
+                colors.parse_color(args.color2, palette=_safe_palette()))
     if args.saturation is not None:
         st["saturation"] = max(0.0, float(args.saturation))
     if args.min_saturation is not None:
@@ -186,6 +196,8 @@ def cmd_set(args) -> int:
 
         # Gradient derives every zone from the two anchors, so a colour picked
         # for one zone would be computed away and the pick would look ignored.
+        # (A range set via --color2 keeps gradient meaningful, so this only
+        # applies to per-zone picks.)
         # Solid is the only effect that can express per-zone colours, so honour
         # the pick by switching to it. With zones synced there is a single
         # colour and gradient can use it as the near anchor, so leave it alone.
@@ -259,6 +271,10 @@ def cmd_effect(args) -> int:
     if args.name not in engine.EFFECTS:
         return _fail(f"unknown effect {args.name!r}; valid: {', '.join(engine.EFFECTS)}")
     st["effect"] = args.name
+    if getattr(args, "color2", None) is not None:
+        st["secondary"] = ("" if args.color2.strip() == ""
+                           else colors.to_hex(colors.parse_color(args.color2,
+                                                                 palette=_safe_palette())))
     zones = _parse_zones(args.zones, st)
     if args.color:
         hexed = colors.to_hex(colors.parse_color(args.color, palette=_safe_palette()))
@@ -615,6 +631,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("set", parents=[common], help="change settings and apply (the plugin's entry point)")
     p.add_argument("--color", "-c", help="colour: RRGGBB, #RRGGBB, 'r,g,b', a name, or @themekey")
+    p.add_argument("--color2", "--secondary", dest="color2",
+                   help="far end of the gradient range; '' clears it")
     p.add_argument("--zones", "-z", default="selected", help="comma list, 'all', or 'selected'")
     p.add_argument("--brightness", "-b", help="0-255 or a percentage like 10%%")
     p.add_argument("--saturation", type=float, help="saturation multiplier (default 1.0, a no-op)")
@@ -642,6 +660,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name", choices=engine.EFFECTS)
     p.add_argument("--zones", "-z", default="all")
     p.add_argument("--color", "-c")
+    p.add_argument("--color2", "--secondary", dest="color2")
     p.add_argument("--brightness", "-b")
     p.add_argument("--speed", "-s")
     p.set_defaults(func=cmd_effect)

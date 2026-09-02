@@ -109,7 +109,7 @@ def applied(monkeypatch):
 
 def _set_args(**kw):
     args = Args(**kw)
-    for name, default in (("color", None), ("zones", "selected"), ("brightness", None),
+    for name, default in (("color", None), ("color2", None), ("zones", "selected"), ("brightness", None),
                           ("saturation", None), ("min_saturation", None), ("effect", None),
                           ("axis", None), ("speed", None), ("themesync", None),
                           ("zonesync", None), ("select", None)):

@@ -48,6 +48,10 @@ DEFAULT_STATE = {
     "saturation": 1.0,
     "min_saturation": 0.55,
     "selected_zone": "kbd",
+    # The far end of a manual gradient, and the second colour multi-colour
+    # effects animate between. Empty means "derive one" - the complement of the
+    # primary - so an existing install keeps working unchanged.
+    "secondary": "",
     # Last colour written into the power button's NVRAM state blocks. Lets the
     # engine skip ~30 slow packets when nothing about that zone changed.
     "pbtn_programmed": "",

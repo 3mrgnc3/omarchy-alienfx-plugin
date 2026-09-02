@@ -66,17 +66,43 @@ def zone_color(st, zone: str) -> tuple:
     return colors.parse_color(spec)
 
 
+def secondary_color(st):
+    """The explicitly chosen far end of a manual gradient, or None."""
+    spec = (st.get("secondary") or "").strip()
+    if not spec:
+        return None
+    try:
+        return colors.parse_color(spec)
+    except colors.ColorError:
+        return None
+
+
 def resolve_anchors(st) -> tuple:
     """The two ends of the gradient.
 
-    In ThemeSync mode both come from the active theme.  In manual mode the user
-    has picked one colour, so the far end is its complement - that way
-    "Gradient" is still a blend rather than a flat fill.
+    In ThemeSync mode both come from the active theme. In manual mode the first
+    picker is the near end; the second picker, when set, is the far end. With no
+    second colour chosen the complement stands in, so "Gradient" is still a
+    blend rather than a flat fill.
     """
     if st.get("themesync"):
         return palette.anchors()
     primary = zone_color(st, "kbd")
-    return primary, colors.complement(primary)
+    chosen = secondary_color(st)
+    return primary, (chosen if chosen is not None else colors.complement(primary))
+
+
+def two_colour_effect(st) -> bool:
+    """Whether an animated effect should animate between two chosen colours.
+
+    Only when the user actually set a second colour and it differs from the
+    first. A derived complement does not count: asking for Solid-red Pulse
+    should pulse red, not pulse red-to-cyan because a complement exists.
+    """
+    chosen = secondary_color(st)
+    if chosen is None:
+        return False
+    return tuple(chosen) != tuple(zone_color(st, "kbd"))
 
 
 def plan(st, zones=None) -> dict:
@@ -92,12 +118,19 @@ def plan(st, zones=None) -> dict:
     effect = effective_effect(st)
     result = {"effect": effect, "zones": targets, "kbd_leds": None,
               "kbd_effect": None, "elc": {}, "kbd_solid": None,
-              "power_programmed": None}
+              "kbd_count": 0, "power_programmed": None}
 
-    elc_targets = [z for z in targets if z in device.ELC_ZONE_NAMES]
+    # Which chassis zones exist, and at which protocol ids, is a property of
+    # the model - some have fewer, some address them differently - so it comes
+    # from the keymap rather than a constant. A zone this machine does not have
+    # is skipped instead of writing to an id that drives nothing.
+    zone_ids = keymap.zones()
+    elc_targets = [z for z in targets if z in zone_ids]
 
     if effect == "off":
-        result["kbd_solid"] = (0, 0, 0) if "kbd" in targets else None
+        if "kbd" in targets:
+            result["kbd_solid"] = (0, 0, 0)
+            result["kbd_count"] = keymap.led_count(keymap.load())
         result["elc"] = {zone: (0, 0, 0) for zone in elc_targets}
         return result
 
@@ -107,23 +140,38 @@ def plan(st, zones=None) -> dict:
         if "kbd" in targets:
             leds = gradient.render_kbd(keymap.load(), first, second, axis)
             result["kbd_leds"] = [(i, *_shape((r, g, b), st)) for i, r, g, b in leds]
-        samples = gradient.elc_samples(first, second)
+        samples = gradient.elc_samples(first, second, list(zone_ids))
         result["elc"] = {zone: _shape(samples[zone], st) for zone in elc_targets}
         return result
 
     if effect == "solid":
         if "kbd" in targets:
             result["kbd_solid"] = _shape(zone_color(st, "kbd"), st)
+            result["kbd_count"] = keymap.led_count(keymap.load())
         result["elc"] = {zone: _shape(zone_color(st, zone), st) for zone in elc_targets}
         return result
 
-    # Animated: the keyboard runs it in firmware, the chassis holds the colour.
-    code, colour_count = _FIRMWARE_EFFECTS[effect]
-    base = _shape(zone_color(st, "kbd"), st)
+    # Animated: the keyboard runs it in firmware.
+    code, _ = _FIRMWARE_EFFECTS[effect]
+    first, second = resolve_anchors(st)
+    two_colour = two_colour_effect(st)
+
+    palette_colours = [_shape(first, st)]
+    if two_colour:
+        palette_colours.append(_shape(second, st))
+
     if "kbd" in targets:
         tempo = apiv5.SPEED_PRESETS.get(str(st.get("speed", "medium")).lower(), 60)
-        result["kbd_effect"] = {"code": code, "rgb": base, "tempo": tempo, "colours": colour_count}
-    result["elc"] = {zone: _shape(zone_color(st, zone), st) for zone in elc_targets}
+        result["kbd_effect"] = {"code": code, "colours": palette_colours, "tempo": tempo}
+
+    if two_colour:
+        # With a range chosen, the chassis samples it the way the gradient does,
+        # so the whole machine reads as one blend rather than the keyboard
+        # animating a range while three lights sit on one end of it.
+        samples = gradient.elc_samples(first, second, list(zone_ids))
+        result["elc"] = {zone: _shape(samples[zone], st) for zone in elc_targets}
+    else:
+        result["elc"] = {zone: _shape(zone_color(st, zone), st) for zone in elc_targets}
     return result
 
 
@@ -185,13 +233,13 @@ def apply(st, zones=None, persist: bool = False, fast: bool = False) -> dict:
             st["kbd_mode"] = "paint"
         elif work["kbd_effect"] is not None:
             spec = work["kbd_effect"]
-            apiv5.firmware_effect(
-                kbd_fd, spec["code"], spec["rgb"],
-                tempo=spec["tempo"], colours=spec["colours"],
-            )
+            apiv5.firmware_effect(kbd_fd, spec["code"], spec["colours"],
+                                  tempo=spec["tempo"])
             st["kbd_mode"] = "effect"
         elif work["kbd_solid"] is not None:
-            apiv5.solid(kbd_fd, work["kbd_solid"], clean=not already_painting)
+            apiv5.solid(kbd_fd, work["kbd_solid"],
+                        count=work["kbd_count"] or apiv5.KBD_LED_COUNT,
+                        clean=not already_painting)
             st["kbd_mode"] = "paint"
 
     def guarded(fn):

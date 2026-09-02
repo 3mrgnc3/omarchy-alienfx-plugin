@@ -97,19 +97,27 @@ nodes lose it at the next reboot or replug.
   either there is no CLI at all, or there is one but the device nodes are not writable
   because the udev rule was never installed. Both leave the lights dead and look
   identical from the outside, so both offer the same fix.
-- **KeyMap Wizard** — appears only while no keymap is installed, and self-hides once one
-  is. Its first question is whether you already have a keymap file to import; only if you
-  decline does it build one by lighting keys one at a time.
+- **KeyMap Wizard** — a small keyboard icon sits top-right, inline with the title, and is
+  always available: re-running the wizard is how you repair or replace a keymap. A larger
+  labelled button also appears while no keymap is installed for this machine, and self-hides
+  once one is. Either opens a terminal with a menu: **1. Load Existing KeyMap File**,
+  **2. Create New KeyMap**.
 - **ThemeSync** *(on by default)* — derives a diagonal gradient from the active theme and
   drives every zone from it. While on, the only other control is brightness, because
   anything else you set would just be overwritten on the next theme switch.
 - **ZoneSync** — move all zones together, or turn it off to reveal the zone selector.
 - **Zone** — Keyboard / PowerButton / Touchpad / Logo.
-- **Colour** — click the swatch for R/G/B sliders. Changes land on the hardware in
-  realtime and autosave as you go. Picking a colour for a single zone switches the
-  effect to Solid, because Gradient derives every zone from its two anchors and would
-  compute a per-zone pick away.
-- **Effect** — Gradient (default), Wave, Pulse, Nightrider, Solid.
+- **Colour range** — two swatches on one row, **FROM** and **TO**, being the two ends of
+  the gradient. Click either to point the R/G/B sliders at it; changes land on the hardware
+  in realtime and autosave as you go. Until you set the far end it shows greyed-out,
+  previewing the complement that would be derived. Choosing **Solid** hides the far end
+  entirely, since a flat colour has no second end.
+- Picking a colour for a single zone switches the effect to Solid, because Gradient derives
+  every zone from its two anchors and would compute a per-zone pick away.
+- **Effect** — Gradient (default), Wave, Pulse, Nightrider, Solid. **Wave, Pulse and
+  Nightrider animate between both ends of the range** when you have set a far colour, and
+  stay single-colour when you have not. The chassis samples the same range so the whole
+  machine reads as one blend.
 - **Profile** — Load and Save. Saving over the loaded name overwrites it; typing a new
   name creates a new profile. A loaded profile persists across reboots.
 
@@ -193,6 +201,31 @@ not hypothetical: on the development laptop `/dev/hidraw0` is a security key, an
 older tooling's hard-coded `hidraw0`/`hidraw1` would have aimed chassis packets at it.
 `ALIENFX_ELC_DEV` / `ALIENFX_KBD_DEV` can pin a node by hand; an override still has to
 pass the identity check.
+
+## Other machines
+
+Nothing about the zone layout is hard-coded to one model. The machine identifies itself
+from DMI (`Alienware m16 R2`, sku, BIOS), and its keymap is stored per model as
+`~/.config/omarchy-alienfx-plugin/keymap/alienware-<model>-keymap.json` — so a config
+directory can move between machines without them fighting over one file. A plain
+`keymap.json` is still honoured for installs that predate this.
+
+A keymap may carry its own `zones` block, e.g.
+
+```json
+"zones": { "tpd": [0], "logo": [2], "pbtn": [4] }
+```
+
+which is what lets a model with fewer or differently-addressed zones work. **Create New
+KeyMap** offers to probe for them: it lights each candidate chassis id in turn and asks
+what came on. Where a machine's zone names are unfamiliar the gradient spreads them evenly
+across the axis instead of using the reference anchors.
+
+Device nodes are always resolved by USB vendor/product id at runtime, so they follow the
+hardware rather than needing configuration.
+
+`alienfx-ctl keymap gaps` reports LED indices the keymap does not name and flags the ones
+adjacent to a named key — reach for it first if a single key ever behaves oddly.
 
 ## Known limits
 

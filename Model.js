@@ -115,6 +115,52 @@ function profileOptions(names) {
 
 // Parse `alienfx-ctl state --json`. Returns null on anything unparseable so
 // the caller can keep showing the last good state instead of blanking out.
+// A "#rrggbb" string QML can assign to a colour property.
+function hexColor(hex) {
+  var text = String(hex || "").replace("#", "").trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(text)) return "#000000";
+  return "#" + text;
+}
+
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  var max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  var h = 0;
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6;
+    if (h < 0) h += 1;
+  }
+  return { h: h, s: max === 0 ? 0 : d / max, v: max };
+}
+
+function hsvToRgb(h, s, v) {
+  var i = Math.floor(h * 6), f = h * 6 - i;
+  var p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+  var r, g, b;
+  switch (i % 6) {
+    case 0: r = v; g = t; b = p; break;
+    case 1: r = q; g = v; b = p; break;
+    case 2: r = p; g = v; b = t; break;
+    case 3: r = p; g = q; b = v; break;
+    case 4: r = t; g = p; b = v; break;
+    default: r = v; g = p; b = q;
+  }
+  return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+}
+
+// The far end the CLI would derive when the user has not chosen one, so the
+// greyed-out swatch previews the colour that would actually be used rather
+// than showing nothing. Mirrors colors.complement().
+function complementHex(hex) {
+  var rgb = hexToRgb(hex);
+  var hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+  var out = hsvToRgb((hsv.h + 0.5) % 1.0, Math.max(hsv.s, 0.35), Math.max(hsv.v, 0.25));
+  return rgbToHex(out.r, out.g, out.b);
+}
+
 // Stream commands are newline-delimited and space-separated, so only simple
 // tokens can travel that way. Anything with whitespace or a quote goes out as a
 // one-shot argv instead, where the shell is never involved.
@@ -144,6 +190,7 @@ if (typeof module !== "undefined") {
     zoneHex: zoneHex, brightnessPercent: brightnessPercent,
     zoneOptions: zoneOptions, effectOptions: effectOptions,
     profileOptions: profileOptions, parseState: parseState,
-    streamSafe: streamSafe
+    streamSafe: streamSafe, hexColor: hexColor, complementHex: complementHex,
+    rgbToHsv: rgbToHsv, hsvToRgb: hsvToRgb
   };
 }
