@@ -571,9 +571,10 @@ def cmd_keymap_gaps(args) -> int:
         print()
         print(f"all unnamed: {_format_ranges(gaps)}")
         print()
-        print("These are filled from the nearest named index, so none of them can")
-        print("hold a stale colour. Name them with 'alienfx-ctl keymap wizard' only")
-        print("if you want their exact gradient position rather than a neighbour's.")
+        print("The gradient paints only named indices, so an unnamed one that is")
+        print("really under a key will hold whatever the last full-range write left")
+        print("(solid/off cover the whole strip). If a key looks stuck or dark, probe")
+        print("the gaps next to it and name the right one: 'alienfx-ctl keymap wizard'.")
     return 0
 
 
