@@ -33,6 +33,17 @@ def _shape(rgb, st) -> tuple:
 
     Order matters: shaping first works on the full-range colour, so a dim
     brightness does not starve the saturation boost of headroom.
+
+    The user's intensity trim lands last of the saturation stages, after the
+    base multiplier and the floor. That ordering is deliberate: it means the
+    trim is monotonic in both directions, because the floor cannot lift a
+    colour back up after the trim has taken it down. At intensity 0 the stage
+    is an exact no-op, so leaving the slider centred reproduces the previous
+    output byte for byte.
+
+    This is the single funnel every colour passes through - the theme gradient
+    per LED, the chassis samples, solid fills and effect colours - which is why
+    one control here covers every mode.
     """
     shaped = colors.boost_hsv(
         rgb,
@@ -40,6 +51,7 @@ def _shape(rgb, st) -> tuple:
         float(st.get("value", 1.0) or 1.0),
     )
     shaped = colors.lift_saturation(shaped, float(st.get("min_saturation", 0.0) or 0.0))
+    shaped = colors.apply_intensity(shaped, int(st.get("intensity", 0) or 0))
     return colors.scale(shaped, int(st.get("brightness", 255)))
 
 

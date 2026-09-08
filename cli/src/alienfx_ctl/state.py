@@ -47,6 +47,12 @@ DEFAULT_STATE = {
     # multiplier stays available but defaults to a no-op.
     "saturation": 1.0,
     "min_saturation": 0.55,
+    # User-facing vibrancy trim, -10..+10, 0 = leave colours exactly as the
+    # theme or the picker gave them. LEDs sit behind a diffuser that mixes white
+    # into everything, so what looks right on screen reads washed out on the
+    # keycaps; this lets each machine be dialled in once and kept. Applies to
+    # every mode, because it lands in the single shaping funnel.
+    "intensity": 0,
     "selected_zone": "kbd",
     # The far end of a manual gradient, and the second colour multi-colour
     # effects animate between. Empty means "derive one" - the complement of the

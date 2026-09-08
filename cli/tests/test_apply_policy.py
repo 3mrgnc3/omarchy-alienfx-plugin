@@ -110,7 +110,8 @@ def applied(monkeypatch):
 def _set_args(**kw):
     args = Args(**kw)
     for name, default in (("color", None), ("color2", None), ("zones", "selected"), ("brightness", None),
-                          ("saturation", None), ("min_saturation", None), ("effect", None),
+                          ("saturation", None), ("min_saturation", None), ("intensity", None),
+                          ("effect", None),
                           ("axis", None), ("speed", None), ("themesync", None),
                           ("zonesync", None), ("select", None)):
         if not hasattr(args, name):
@@ -160,3 +161,44 @@ def test_unsynced_zones_target_only_the_selection(applied, config_root):
     state.save_state(st)
     cli.cmd_set(_set_args(color="00ff00"))
     assert applied["zones"] == ["logo"]
+
+
+# ------------------------------------------------------------ intensity trim
+
+def test_intensity_reaches_every_mode(config_root):
+    """It lands in _shape, the single funnel every colour passes through, so one
+    control covers the theme gradient, solid fills, effects and the chassis.
+    Asserted here because a future refactor that bypassed _shape would silently
+    make the slider stop working in whichever mode it skipped."""
+    from alienfx_ctl import engine
+    base = (190, 63, 80)
+    st = state.load_state()
+    st["brightness"] = 255
+    st["intensity"] = 0
+    neutral = engine._shape(base, st)
+    st["intensity"] = 10
+    boosted = engine._shape(base, st)
+    assert boosted != neutral
+
+
+def test_intensity_zero_leaves_the_pipeline_unchanged(config_root):
+    """The upgrade-safety property: a user who never touches the slider must see
+    exactly what they saw before it existed."""
+    from alienfx_ctl import engine, colors as c
+    st = state.load_state()
+    st["intensity"] = 0
+    for spec in ("be3f50", "3fbead", "e68e0d", "22aa66"):
+        rgb = c.parse_color(spec)
+        expected = c.scale(
+            c.lift_saturation(
+                c.boost_hsv(rgb, st["saturation"], st.get("value", 1.0)),
+                st["min_saturation"]),
+            st["brightness"])
+        assert engine._shape(rgb, st) == expected
+
+
+def test_intensity_persists_like_any_other_preference(config_root):
+    st = state.load_state()
+    st["intensity"] = -4
+    state.save_state(st)
+    assert state.load_state()["intensity"] == -4

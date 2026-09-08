@@ -78,6 +78,14 @@ function zoneHex(state, zone) {
   return (entry && entry.color) ? String(entry.color) : "ffffff";
 }
 
+// Shown next to the intensity slider. Signed, so the neutral centre reads as a
+// deliberate "0" rather than looking like an empty or broken value.
+function intensityLabel(value) {
+  var n = Math.round(Number(value) || 0);
+  if (n === 0) return "0";
+  return (n > 0 ? "+" : "") + n;
+}
+
 function brightnessPercent(value) {
   return Math.round((Number(value) || 0) / 255 * 100);
 }
@@ -187,6 +195,7 @@ if (typeof module !== "undefined") {
     ICON: ICON, ZONE_LABELS: ZONE_LABELS, ZONE_ORDER: ZONE_ORDER,
     EFFECT_LABELS: EFFECT_LABELS, EFFECT_ORDER: EFFECT_ORDER,
     clamp255: clamp255, hexToRgb: hexToRgb, rgbToHex: rgbToHex,
+    intensityLabel: intensityLabel,
     zoneHex: zoneHex, brightnessPercent: brightnessPercent,
     zoneOptions: zoneOptions, effectOptions: effectOptions,
     profileOptions: profileOptions, parseState: parseState,

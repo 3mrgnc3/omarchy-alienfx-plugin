@@ -192,3 +192,54 @@ def lift_saturation(rgb, minimum: float = 0.0) -> tuple:
         return clamp_rgb(rgb)
     red, green, blue = colorsys.hsv_to_rgb(hue, min(1.0, minimum), val)
     return (round(red * 255), round(green * 255), round(blue * 255))
+
+
+#: How far the intensity control can travel in each direction. The UI shows
+#: -10..+10 with 0 in the middle; 0 must be an exact no-op so that leaving the
+#: slider alone reproduces the previous behaviour byte for byte.
+INTENSITY_RANGE = 10
+
+
+def apply_intensity(rgb, intensity: int = 0) -> tuple:
+    """Make a colour more or less vivid, without touching hue or brightness.
+
+    LEDs sit behind a diffuser that mixes white into everything, so a colour
+    that looks right on screen reads washed out on the keycaps. Compensating
+    for that means removing white - raising saturation - which is a different
+    axis from brightness. Multiplying the RGB values instead would only make
+    the colour brighter and clip the highlights, which is what the brightness
+    control already does.
+
+    ``intensity`` runs -10..+10 and moves a *fraction of the remaining
+    headroom* rather than multiplying:
+
+        +n  saturation += (1 - saturation) * n/10   ->  +10 is fully vivid
+        -n  saturation *= (1 - n/10)                ->  -10 is fully grey
+
+    A multiplier was the obvious first choice and is the wrong shape: it clamps
+    at full saturation, so with typical theme colours (0.2-0.7 saturated)
+    everything above about +5 would look identical and the top half of the
+    slider would do nothing. Moving a proportion of what is left keeps every
+    step perceptually even and makes both ends mean something.
+
+    A colour with no real hue is left alone. Below the noise floor the hue is
+    rounding error, and "saturating" it would invent a colour the user never
+    chose - a grey would come out red.
+    """
+    steps = max(-INTENSITY_RANGE, min(INTENSITY_RANGE, int(intensity)))
+    if steps == 0:
+        return clamp_rgb(rgb)
+
+    red, green, blue = (channel / 255.0 for channel in clamp_rgb(rgb))
+    hue, sat, val = colorsys.rgb_to_hsv(red, green, blue)
+    if sat < _HUE_NOISE_FLOOR:
+        return clamp_rgb(rgb)
+
+    fraction = steps / float(INTENSITY_RANGE)
+    if fraction > 0:
+        sat = sat + (1.0 - sat) * fraction
+    else:
+        sat = sat * (1.0 + fraction)
+
+    red, green, blue = colorsys.hsv_to_rgb(hue, max(0.0, min(1.0, sat)), val)
+    return (round(red * 255), round(green * 255), round(blue * 255))

@@ -66,6 +66,7 @@ Panel {
   property string uiZone: "kbd"
   property string uiProfile: ""
   property int uiBrightness: 26
+  property int uiIntensity: 0
 
   // The gradient range: two ends, each its own swatch. "a" is the near end and
   // the only one Solid uses.
@@ -97,6 +98,7 @@ Panel {
   readonly property bool hasRange: root.uiColorB !== "" && root.uiColorB !== root.uiColorA
 
   readonly property bool anyDragging: brightnessSlider.dragging
+    || intensitySlider.dragging
     || redSlider.dragging || greenSlider.dragging || blueSlider.dragging
 
   readonly property bool themesync: uiThemesync
@@ -223,6 +225,7 @@ Panel {
       root.uiProfile = reported
     }
     if (s.brightness !== undefined) root.uiBrightness = s.brightness
+    if (s.intensity !== undefined) root.uiIntensity = s.intensity
     root.uiColorA = Model.zoneHex(s, root.uiZone)
     root.uiColorB = s.secondary ? String(s.secondary) : ""
     loadPickerFromTarget()
@@ -310,6 +313,15 @@ Panel {
     }
     // An intermediate frame may be dropped if the hardware is busy; the value
     // the user settles on may not, or saved state ends up behind the UI.
+    if (live) args.push("--drop-if-busy")
+    root.run(args)
+  }
+
+  function setIntensity(value, live) {
+    root.uiIntensity = Math.max(-10, Math.min(10, Math.round(value)))
+    var args = ["set", "--intensity", String(root.uiIntensity), "--fast"]
+    // An intermediate frame may be dropped; the value the user settles on may
+    // not, or saved state ends up behind the UI.
     if (live) args.push("--drop-if-busy")
     root.run(args)
   }
@@ -456,6 +468,14 @@ Panel {
     repeat: false
     property int pending: 0
     onTriggered: root.setBrightness(pending, true)
+  }
+
+  Timer {
+    id: intensityDebounce
+    interval: 160
+    repeat: false
+    property int pending: 0
+    onTriggered: root.setIntensity(pending, true)
   }
 
   IpcHandler {
@@ -759,6 +779,57 @@ Panel {
               brightnessDebounce.stop()
               root.touch()
               root.setBrightness(v, false)
+            }
+          }
+
+          // Vibrancy trim. Lives here rather than with the colour controls
+          // because it applies to every mode - including ThemeSync, which hides
+          // everything else - and is meant to be dialled in once per machine
+          // and left alone.
+          Item {
+            width: parent.width
+            implicitHeight: intensityLabel.implicitHeight
+
+            PanelSectionHeader {
+              id: intensityLabel
+              text: "INTENSITY"
+              foreground: root.fg
+              fontFamily: root.fontFamily
+              anchors.left: parent.left
+            }
+
+            Text {
+              text: Model.intensityLabel(intensitySlider.liveValue)
+              color: Qt.darker(root.fg, 1.3)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              anchors.right: parent.right
+              anchors.baseline: intensityLabel.baseline
+            }
+          }
+
+          PanelSlider {
+            id: intensitySlider
+            width: parent.width
+            bar: root.bar
+            minimum: -10
+            maximum: 10
+            step: 1
+            integer: true
+            // Three ticks put a mark at the centre, so the neutral position is
+            // findable without reading the number.
+            tickCount: 3
+            value: root.uiIntensity
+            onMoved: function (v) {
+              root.uiIntensity = Math.round(v)
+              root.touch()
+              intensityDebounce.pending = Math.round(v)
+              intensityDebounce.restart()
+            }
+            onReleased: function (v) {
+              intensityDebounce.stop()
+              root.touch()
+              root.setIntensity(v, false)
             }
           }
         }

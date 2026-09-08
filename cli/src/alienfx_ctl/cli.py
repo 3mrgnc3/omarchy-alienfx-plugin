@@ -126,6 +126,8 @@ def cmd_state(args) -> int:
     print(f"range       : #{colors.to_hex(engine.zone_color(st, 'kbd'))}"
           + (f" -> #{colors.to_hex(_second)}" if _second else " -> (derived complement)"))
     print(f"brightness  : {st['brightness']} ({round(st['brightness'] / 255 * 100)}%)")
+    print(f"intensity   : {int(st.get('intensity', 0)):+d}"
+          f"{'  (default)' if not st.get('intensity') else ''}")
     print(f"profile     : {state.current_profile() or '(none)'}")
     print(f"keymap      : {'user' if keymap.has_user_keymap() else 'shipped default'}")
     for zone in device.ZONES:
@@ -162,6 +164,9 @@ def cmd_set(args) -> int:
         else:
             st["secondary"] = colors.to_hex(
                 colors.parse_color(args.color2, palette=_safe_palette()))
+    if args.intensity is not None:
+        st["intensity"] = max(-colors.INTENSITY_RANGE,
+                              min(colors.INTENSITY_RANGE, int(args.intensity)))
     if args.saturation is not None:
         st["saturation"] = max(0.0, float(args.saturation))
     if args.min_saturation is not None:
@@ -636,6 +641,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="far end of the gradient range; '' clears it")
     p.add_argument("--zones", "-z", default="selected", help="comma list, 'all', or 'selected'")
     p.add_argument("--brightness", "-b", help="0-255 or a percentage like 10%%")
+    p.add_argument("--intensity", type=int,
+                   help="vibrancy trim -10..+10; 0 leaves colours untouched")
     p.add_argument("--saturation", type=float, help="saturation multiplier (default 1.0, a no-op)")
     p.add_argument("--min-saturation", dest="min_saturation", type=float,
                    help="saturation floor 0-1: lifts washed-out theme colours, leaves vivid ones alone")
