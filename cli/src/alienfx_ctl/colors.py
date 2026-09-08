@@ -201,7 +201,7 @@ INTENSITY_RANGE = 10
 
 
 def apply_intensity(rgb, intensity: int = 0) -> tuple:
-    """Make a colour more or less vivid, without touching hue or brightness.
+    """Make a colour more or less vivid, without shifting its hue.
 
     LEDs sit behind a diffuser that mixes white into everything, so a colour
     that looks right on screen reads washed out on the keycaps. Compensating
@@ -211,16 +211,27 @@ def apply_intensity(rgb, intensity: int = 0) -> tuple:
     control already does.
 
     ``intensity`` runs -10..+10 and moves a *fraction of the remaining
-    headroom* rather than multiplying:
+    headroom* rather than multiplying, at a rate of one full step per 5 points:
 
-        +n  saturation += (1 - saturation) * n/10   ->  +10 is fully vivid
-        -n  saturation *= (1 - n/10)                ->  -10 is fully grey
+        +5   saturation reaches 1.0  (fully vivid hue)
+        +10  value also reaches 1.0  (as intense as the hue can be expressed)
+        -5   saturation reaches 0.0  (fully grey)
 
-    A multiplier was the obvious first choice and is the wrong shape: it clamps
-    at full saturation, so with typical theme colours (0.2-0.7 saturated)
-    everything above about +5 would look identical and the top half of the
-    slider would do nothing. Moving a proportion of what is left keeps every
-    step perceptually even and makes both ends mean something.
+    Two things are deliberate here.
+
+    *The rate.* One full step per 5 points rather than per 10, because measured
+    across real themes the useful travel is small: on `matte-black` the whole
+    gradient only has 0.23 of saturation headroom, since its colours already
+    start between 0.55 and 0.94 saturated. Half the slider was being spent
+    getting somewhere it could have reached in a quarter of it.
+
+    *The spill into value.* Saturation caps at 1.0, so doubling the rate on its
+    own would make everything past +5 identical and waste the top half of the
+    control. Once there is no white left to remove, further intensity raises
+    the colour's own value instead - the remaining axis along which a hue can
+    look more intense. Past -5 there is nothing left to do: fully grey is fully
+    grey, and going darker is what the brightness control is for, so the
+    negative end plateaus rather than duplicating it.
 
     A colour with no real hue is left alone. Below the noise floor the hue is
     rounding error, and "saturating" it would invent a colour the user never
@@ -235,11 +246,15 @@ def apply_intensity(rgb, intensity: int = 0) -> tuple:
     if sat < _HUE_NOISE_FLOOR:
         return clamp_rgb(rgb)
 
-    fraction = steps / float(INTENSITY_RANGE)
-    if fraction > 0:
-        sat = sat + (1.0 - sat) * fraction
+    # One full step of headroom per half of the range.
+    gain = steps / (INTENSITY_RANGE / 2.0)
+    if gain > 0:
+        sat = sat + (1.0 - sat) * min(1.0, gain)
+        if gain > 1.0:
+            val = val + (1.0 - val) * min(1.0, gain - 1.0)
     else:
-        sat = sat * (1.0 + fraction)
+        sat = sat * max(0.0, 1.0 + gain)
 
-    red, green, blue = colorsys.hsv_to_rgb(hue, max(0.0, min(1.0, sat)), val)
+    red, green, blue = colorsys.hsv_to_rgb(
+        hue, max(0.0, min(1.0, sat)), max(0.0, min(1.0, val)))
     return (round(red * 255), round(green * 255), round(blue * 255))
