@@ -41,17 +41,15 @@ DEFAULT_STATE = {
     "axis": "tl-br",
     "brightness": DEFAULT_BRIGHTNESS,
     "speed": "medium",
-    # Keycaps sit behind a diffuser that washes colour out. A floor lifts a
-    # washed-out theme accent to something that still reads as a colour, while
-    # leaving an already-vivid accent exactly as the theme authored it. The
-    # multiplier stays available but defaults to a no-op.
-    "saturation": 1.0,
-    "min_saturation": 0.55,
-    # User-facing vibrancy trim, -10..+10, 0 = leave colours exactly as the
-    # theme or the picker gave them. LEDs sit behind a diffuser that mixes white
-    # into everything, so what looks right on screen reads washed out on the
-    # keycaps; this lets each machine be dialled in once and kept. Applies to
-    # every mode, because it lands in the single shaping funnel.
+    # Vibrancy. Keycaps sit behind a diffuser that mixes white into everything,
+    # so a colour that looks right on screen reads washed out on the keys. This
+    # is the *only* saturation control: -10..+10 as an absolute target, 0 = 0.50
+    # saturation, +10 = 1.00, -10 = 0.05 (only just tinted).
+    #
+    # It replaced an overlapping trio - a `saturation` multiplier, a
+    # `min_saturation` floor and a relative trim - which fought each other and
+    # left the default a no-op on most themes. Those keys are gone; a file that
+    # still carries them is simply ignored.
     "intensity": 0,
     "selected_zone": "kbd",
     # The far end of a manual gradient, and the second colour multi-colour
@@ -157,8 +155,20 @@ def load_state() -> dict:
     return _merge_defaults(read_json(state_path()))
 
 
+#: Keys that must never reach the state file. ``themesync`` lives in its own
+#: flag file. The other two are *hardware* state - which mode the keyboard
+#: descriptor is in, and whether the power button's NVRAM has been programmed -
+#: and both caused intermittent, hard-to-place failures when they were
+#: persisted: a one-shot process would read a mode set by some earlier process,
+#: skip the reset its own fresh descriptor needed, and paint garbage. They are
+#: per-process module globals now (apiv5._last_mode, apiv4._last_programmed).
+#: Stripped on write rather than merely unwritten, so a file left behind by an
+#: older version cleans itself up instead of being read back forever.
+_NEVER_PERSIST = ("themesync", "kbd_mode", "pbtn_programmed")
+
+
 def save_state(new_state) -> None:
-    payload = {k: v for k, v in new_state.items() if k != "themesync"}
+    payload = {k: v for k, v in new_state.items() if k not in _NEVER_PERSIST}
     ensure_dirs()
     write_json_atomic(state_path(), payload)
 

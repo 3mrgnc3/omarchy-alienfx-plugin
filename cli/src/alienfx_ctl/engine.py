@@ -29,29 +29,25 @@ class EngineError(RuntimeError):
 
 
 def _shape(rgb, st) -> tuple:
-    """Apply saturation shaping then brightness scaling, in that order.
+    """Set saturation from the intensity control, then scale for brightness.
 
-    Order matters: shaping first works on the full-range colour, so a dim
-    brightness does not starve the saturation boost of headroom.
+    In that order: saturation works on the full-range colour, so a dim
+    brightness does not starve it of headroom.
 
-    The user's intensity trim lands last of the saturation stages, after the
-    base multiplier and the floor. That ordering is deliberate: it means the
-    trim is monotonic in both directions, because the floor cannot lift a
-    colour back up after the trim has taken it down. At intensity 0 the stage
-    is an exact no-op, so leaving the slider centred reproduces the previous
-    output byte for byte.
+    Exactly one saturation stage. There were three - a multiplier, a
+    ``min_saturation`` floor and a relative intensity trim - which overlapped
+    and fought each other: the floor could lift a colour the trim had just
+    taken down, and on a typical 0.67-saturated theme accent the floor never
+    engaged and the trim's centre was a no-op, so the default did nothing at
+    all and the keyboard read washed out. The intensity control is now an
+    absolute target and the only authority on how vivid a colour is.
 
-    This is the single funnel every colour passes through - the theme gradient
-    per LED, the chassis samples, solid fills and effect colours - which is why
-    one control here covers every mode.
+    This is the single funnel every colour passes through - the two gradient
+    anchors, the chassis samples, solid fills and effect colours - which is why
+    one control here covers every mode. Note *anchors*, not interpolated keys:
+    see docs/dead-ends.md for what happened when this ran per key.
     """
-    shaped = colors.boost_hsv(
-        rgb,
-        float(st.get("saturation", 1.0) or 1.0),
-        float(st.get("value", 1.0) or 1.0),
-    )
-    shaped = colors.lift_saturation(shaped, float(st.get("min_saturation", 0.0) or 0.0))
-    shaped = colors.apply_intensity(shaped, int(st.get("intensity", 0) or 0))
+    shaped = colors.apply_intensity(rgb, int(st.get("intensity", 0) or 0))
     return colors.scale(shaped, int(st.get("brightness", 255)))
 
 
@@ -147,11 +143,46 @@ def plan(st, zones=None) -> dict:
     if effect == "gradient":
         first, second = resolve_anchors(st)
         axis = st.get("axis", gradient.DEFAULT_AXIS)
+
+        # Shape the two anchors, then interpolate between them.
+        #
+        # Never the other way round. _shape sets saturation to an absolute
+        # target, which is a non-linear, clamping step, and applying it to each
+        # interpolated key
+        # destroys the blend: a two-colour gradient is smooth precisely because
+        # its saturation ramps down through the middle and back up, and clamping
+        # every key flattens that ramp until only hue varies - which snaps from
+        # one anchor to the other and renders as two solid blocks with a seam.
+        # A lerp between two fixed endpoints cannot band; it is linear by
+        # construction however non-linear the shaping that produced them.
+        near, far = _shape(first, st), _shape(second, st)
+
+        keymap_data = keymap.load()
+        leds = gradient.render_kbd(keymap_data, near, far, axis)
         if "kbd" in targets:
-            leds = gradient.render_kbd(keymap.load(), first, second, axis)
-            result["kbd_leds"] = [(i, *_shape((r, g, b), st)) for i, r, g, b in leds]
-        samples = gradient.elc_samples(first, second, list(zone_ids))
-        result["elc"] = {zone: _shape(samples[zone], st) for zone in elc_targets}
+            result["kbd_leds"] = leds
+
+        samples = gradient.elc_samples(near, far, list(zone_ids))
+
+        # The chassis zones sit at the corners of the blend, and take the
+        # *exact* colour of the corner key rather than a fixed point on the
+        # axis - t=1.0 lands slightly past the bottom-right key, which is at
+        # 0.969 on this keymap. Zones this machine does not have are left as
+        # elc_samples spread them.
+        try:
+            near_index, far_index = gradient.extreme_indices(keymap_data, axis)
+            by_index = {i: (r, g, b) for i, r, g, b in leds}
+            corner_near = by_index.get(near_index, near)
+            corner_far = by_index.get(far_index, far)
+            for zone, colour in (("tpd", corner_near),    # touchpad ring == esc
+                                 ("logo", corner_near),   # lid, the near end
+                                 ("pbtn", corner_far)):   # power == bottom-right key
+                if zone in samples:
+                    samples[zone] = colour
+        except gradient.GradientError:
+            pass
+
+        result["elc"] = {zone: samples[zone] for zone in elc_targets}
         return result
 
     if effect == "solid":

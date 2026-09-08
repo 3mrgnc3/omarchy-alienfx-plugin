@@ -12,6 +12,8 @@ the same axis, which is what makes the whole chassis read as one blend.
 
 from __future__ import annotations
 
+from . import colors
+
 AXES = ("tl-br", "tr-bl", "lr", "tb")
 DEFAULT_AXIS = "tl-br"
 
@@ -67,6 +69,36 @@ def _row_col(position) -> tuple:
     return int(position[0]), int(position[1])
 
 
+def key_ratios(keymap, axis: str = DEFAULT_AXIS) -> list:
+    """``(t, led_index)`` for every key the keymap names, ordered along the axis.
+
+    The single place that walks a keymap along the gradient axis. Both the
+    renderer and the corner lookup need exactly this, and a caller wanting to
+    inspect the blend the way the eye reads it needs it too, so they share one
+    implementation rather than three copies of the same loop.
+
+    A key with an index but no grid position lands mid-blend, so an incomplete
+    keymap still lights fully rather than leaving holes.
+    """
+    key_to_index = keymap.get("key_to_index") or {}
+    if not key_to_index:
+        raise GradientError("keymap has no key_to_index")
+    grid_positions = keymap.get("grid_positions") or {}
+    max_row, max_col = grid_extent(grid_positions) if grid_positions else (0, 0)
+
+    ratios = []
+    for key, index in key_to_index.items():
+        position = grid_positions.get(key)
+        if position is None:
+            ratio = 0.5
+        else:
+            row, col = _row_col(position)
+            ratio = sample_axis(row, col, max_row, max_col, axis)
+        ratios.append((ratio, int(index)))
+    ratios.sort()
+    return ratios
+
+
 def render_kbd(keymap, first, second, axis: str = DEFAULT_AXIS):
     """Render the gradient across the keyboard.
 
@@ -91,25 +123,27 @@ def render_kbd(keymap, first, second, axis: str = DEFAULT_AXIS):
     A key with an index but no grid position lands mid-blend, so an incomplete
     keymap still lights fully rather than leaving holes.
     """
-    key_to_index = keymap.get("key_to_index") or {}
-    grid_positions = keymap.get("grid_positions") or {}
-    if not key_to_index:
-        raise GradientError("keymap has no key_to_index")
-
-    max_row, max_col = grid_extent(grid_positions) if grid_positions else (0, 0)
-
-    leds = []
-    for key, index in key_to_index.items():
-        position = grid_positions.get(key)
-        if position is None:
-            ratio = 0.5
-        else:
-            row, col = _row_col(position)
-            ratio = sample_axis(row, col, max_row, max_col, axis)
-        red, green, blue = lerp_rgb(first, second, ratio)
-        leds.append((int(index), red, green, blue))
+    leds = [(index,) + colors.lerp_perceptual(first, second, ratio)
+            for ratio, index in key_ratios(keymap, axis)]
     leds.sort(key=lambda led: led[0])
     return leds
+
+
+def extreme_indices(keymap, axis: str = DEFAULT_AXIS) -> tuple:
+    """LED indices of the first and last keys along the axis.
+
+    Returned so a chassis zone can take a corner key's *exact* colour rather
+    than sampling a fixed point on the axis. The two are not the same: on the
+    reference keymap `esc` sits at t=0.000 but the bottom-right key (the right
+    arrow) sits at t=0.969, because the grid's widest column is 16 - the media
+    keys - while the arrow is at column 13. Sampling t=1.0 for the power button
+    therefore lands slightly past the corner it is supposed to match.
+
+    Derived from the keymap rather than hard-coded, so it stays correct on
+    another model, another layout, or a different axis.
+    """
+    ratios = key_ratios(keymap, axis)
+    return ratios[0][1], ratios[-1][1]
 
 
 def elc_samples(first, second, zone_names=None) -> dict:
@@ -121,15 +155,16 @@ def elc_samples(first, second, zone_names=None) -> dict:
     is nothing model-specific to anchor them to.
     """
     if not zone_names:
-        return {zone: lerp_rgb(first, second, ratio)
+        return {zone: colors.lerp_perceptual(first, second, ratio)
                 for zone, ratio in ELC_ANCHORS.items()}
 
     names = list(zone_names)
     if all(name in ELC_ANCHORS for name in names):
-        return {name: lerp_rgb(first, second, ELC_ANCHORS[name]) for name in names}
+        return {name: colors.lerp_perceptual(first, second, ELC_ANCHORS[name])
+                for name in names}
 
     if len(names) == 1:
-        return {names[0]: lerp_rgb(first, second, 0.5)}
+        return {names[0]: colors.lerp_perceptual(first, second, 0.5)}
     step = 1.0 / (len(names) - 1)
-    return {name: lerp_rgb(first, second, index * step)
+    return {name: colors.lerp_perceptual(first, second, index * step)
             for index, name in enumerate(names)}

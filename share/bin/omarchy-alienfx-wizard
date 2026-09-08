@@ -2,26 +2,71 @@
 # Launch the KeyMap Wizard in a terminal window.
 #
 # The wizard is a step-through interactive flow, which a terminal already does
-# well; rebuilding that in QML would be a lot of surface for no gain. The
-# window is kept open at the end so the result stays readable.
+# well; rebuilding that in QML would be a lot of surface for no gain.
+#
+# Two modes, and the split is load-bearing rather than tidiness:
+#
+#   (no args)  find a terminal and re-run this script inside it with --run
+#   --run      we are already in the terminal; run the wizard and hold the window
+#
+# It exists because every argument handed to Omarchy's terminal helpers must be
+# a SINGLE SHELL TOKEN. `omarchy-launch-or-focus-tui` builds its command as
+# `LAUNCH_COMMAND="omarchy-launch-tui $@"` and `omarchy-launch-or-focus` then
+# runs `eval exec setsid $LAUNCH_COMMAND`. Both steps drop the original quoting,
+# so a multi-word argument is re-split into separate words.
+#
+# This previously passed `bash -lc "<cli> keymap wizard; ...; read -r _"`. After
+# the eval, `bash -lc` received only the CLI path and no arguments - it printed
+# its usage and exited - while the `read` meant to hold the window open ran in
+# the *launching* shell. The window appeared and vanished instantly, which is
+# exactly what it looked like: a terminal flickering and closing.
+#
+# So: no quoted snippets, no semicolons, nothing that survives only while
+# quoted. `--run` is one token and cannot be mangled.
 
 set -u
-CLI="${ALIENFX_CTL:-$HOME/.local/bin/alienfx-ctl}"
-[[ -x $CLI ]] || CLI="$(command -v alienfx-ctl 2>/dev/null || echo "$CLI")"
 
-inner="'$CLI' keymap wizard; status=\$?; printf '\n[press Enter to close] '; read -r _; exit \$status"
+resolve_cli() {
+  local cli="${ALIENFX_CTL:-$HOME/.local/bin/alienfx-ctl}"
+  [[ -x $cli ]] || cli="$(command -v alienfx-ctl 2>/dev/null || true)"
+  printf '%s' "$cli"
+}
 
+if [[ ${1:-} == --run ]]; then
+  CLI="$(resolve_cli)"
+  if [[ -z $CLI || ! -x $CLI ]]; then
+    echo "omarchy-alienfx-wizard: alienfx-ctl not found on PATH or at ~/.local/bin" >&2
+    status=127
+  else
+    "$CLI" keymap wizard
+    status=$?
+  fi
+  # Hold the window so the result stays readable. `read` fails immediately
+  # without a tty, so guard it rather than spinning or exiting mid-sentence.
+  if [[ -t 0 ]]; then
+    printf '\n[press Enter to close] '
+    read -r _
+  fi
+  exit $status
+fi
+
+SELF="$(realpath -- "${BASH_SOURCE[0]}")"
+APP_ID=alienfx-wizard
+
+# Each branch passes only single tokens: the script path and --run.
 if command -v omarchy-launch-or-focus-tui >/dev/null 2>&1; then
-  exec omarchy-launch-or-focus-tui --app-id=alienfx-wizard bash -lc "$inner"
+  exec omarchy-launch-or-focus-tui "--app-id=$APP_ID" "$SELF" --run
+elif command -v omarchy-launch-tui >/dev/null 2>&1; then
+  exec omarchy-launch-tui "--app-id=$APP_ID" "$SELF" --run
 elif command -v omarchy-launch-terminal >/dev/null 2>&1; then
-  exec omarchy-launch-terminal bash -lc "$inner"
+  exec omarchy-launch-terminal "$SELF" --run
 fi
 
 for term in ghostty kitty alacritty foot; do
   if command -v "$term" >/dev/null 2>&1; then
-    exec "$term" -e bash -lc "$inner"
+    exec "$term" -e "$SELF" --run
   fi
 done
 
-echo "omarchy-alienfx-wizard: no terminal found; run '$CLI keymap wizard' yourself" >&2
+echo "omarchy-alienfx-wizard: no terminal found; run 'alienfx-ctl keymap wizard' yourself" >&2
 exit 1

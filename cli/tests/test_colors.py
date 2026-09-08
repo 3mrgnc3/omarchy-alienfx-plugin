@@ -138,12 +138,29 @@ def test_lift_saturation_preserves_value():
 # on screen reads washed out on the keycaps. The trim removes white (raises
 # saturation) rather than multiplying RGB, which would only brighten and clip.
 
-def test_intensity_zero_is_an_exact_no_op():
-    """The default must reproduce the previous output byte for byte, or every
-    existing install changes appearance on upgrade."""
-    for spec in ("be3f50", "82fb9c", "e68e0d", "000000", "ffffff", "808080"):
+def test_intensity_zero_is_a_deliberate_and_vivid_default():
+    """The centre of the control is a *known* value, not "whatever the theme
+    happened to pick". It used to be an exact no-op, which sounded safe but
+    meant the default did nothing at all: theme accents arrive around 0.67
+    saturation and read washed out through the diffuser.
+
+    It sits close to the ceiling because that is where it was calibrated by eye
+    on real hardware - deliberately vivid, with the range's remaining travel
+    spent below it rather than above."""
+    for spec in ("be3f50", "82fb9c", "e68e0d"):
+        out = colors.apply_intensity(colors.parse_color(spec), 0)
+        assert colors.saturation_of(out) == pytest.approx(colors.INTENSITY_MIDDLE, abs=0.01)
+    assert colors.INTENSITY_MIDDLE > 0.8, "the default must not be pale"
+
+
+def test_colours_with_no_hue_are_left_alone_at_every_setting():
+    """Saturating a grey would invent a colour nobody chose - below the noise
+    floor its hue is rounding error, so a monochrome theme must stay
+    monochrome."""
+    for spec in ("000000", "ffffff", "808080"):
         rgb = colors.parse_color(spec)
-        assert colors.apply_intensity(rgb, 0) == rgb
+        for step in (-10, 0, 10):
+            assert colors.apply_intensity(rgb, step) == rgb
 
 
 def test_positive_intensity_raises_saturation():
@@ -158,38 +175,31 @@ def test_negative_intensity_lowers_saturation():
     assert colors.saturation_of(colors.apply_intensity(rgb, -5)) < colors.saturation_of(rgb)
 
 
-def test_saturation_is_exhausted_by_the_halfway_point():
-    """The rate is one full step of headroom per 5 points, not per 10. Measured
-    across real themes the useful travel is small - `matte-black`'s whole
-    gradient has only 0.23 of saturation headroom - so half the slider was
-    being spent getting somewhere it could reach in a quarter of it."""
-    rgb = colors.parse_color("be3f50")
-    assert colors.saturation_of(colors.apply_intensity(rgb, 5)) == pytest.approx(1.0, abs=0.01)
-    assert colors.saturation_of(colors.apply_intensity(rgb, -5)) == pytest.approx(0.0, abs=0.01)
+def test_the_three_settings_that_matter_land_on_their_stated_values():
+    """-10, 0 and +10 are the settings a user reasons about, so they hit the
+    documented numbers exactly rather than approximately."""
+    assert colors.intensity_saturation(-10) == pytest.approx(colors.INTENSITY_FLOOR)
+    assert colors.intensity_saturation(0) == pytest.approx(colors.INTENSITY_MIDDLE)
+    assert colors.intensity_saturation(10) == pytest.approx(colors.INTENSITY_CEILING)
 
 
-def test_the_top_half_spills_into_value_rather_than_doing_nothing():
-    """Saturation caps at 1.0, so doubling the rate on its own would make
-    everything past +5 identical. Once there is no white left to remove,
-    further intensity raises the colour's own value instead."""
-    import colorsys
-    rgb = colors.parse_color("be3f50")
-
-    def hsv(c):
-        return colorsys.rgb_to_hsv(*[ch / 255 for ch in c])
-
-    at5, at10 = hsv(colors.apply_intensity(rgb, 5)), hsv(colors.apply_intensity(rgb, 10))
-    assert at10[1] == pytest.approx(at5[1], abs=0.01), "saturation should already be maxed"
-    assert at10[2] > at5[2], "value must keep climbing"
-    assert at10[2] == pytest.approx(1.0, abs=0.01), "+10 is as intense as the hue gets"
+def test_the_floor_is_muted_but_still_clearly_coloured():
+    """The bottom of the range is a muted setting, not a colourless one. It was
+    briefly near-white (0.05), which turned out to be further than anyone wanted
+    to go - the whole scale was recalibrated upwards, and the bottom with it."""
+    assert 0.3 < colors.INTENSITY_FLOOR < 0.5
+    out = colors.apply_intensity(colors.parse_color("be3f50"), -10)
+    assert max(out) - min(out) > 40, "still obviously a colour"
+    assert colors.saturation_of(out) < colors.INTENSITY_MIDDLE, "and muted"
 
 
-def test_the_negative_end_plateaus_rather_than_dimming():
-    """Fully grey is fully grey. Continuing past -5 could only mean going
-    darker, which is what the brightness control is for - duplicating it here
-    would give two sliders that fight each other."""
-    rgb = colors.parse_color("be3f50")
-    assert colors.apply_intensity(rgb, -5) == colors.apply_intensity(rgb, -10)
+def test_each_half_of_the_range_is_evenly_spaced():
+    """Two straight segments meeting at the centre, so a step feels the same
+    size wherever the user is on that half."""
+    for half in (range(-10, 1), range(0, 11)):
+        steps = [colors.intensity_saturation(i) for i in half]
+        gaps = [b - a for a, b in zip(steps, steps[1:])]
+        assert max(gaps) - min(gaps) < 1e-9, "uneven steps"
 
 
 def test_intensity_is_monotonic_across_the_whole_range():
@@ -214,16 +224,19 @@ def test_intensity_never_shifts_hue():
     rgb = colors.parse_color("be3f50")
     for step in range(-10, 11):
         out = colors.apply_intensity(rgb, step)
-        if colors.saturation_of(out) > 0.02:      # a grey has no hue to compare
+        # Hue is only meaningful once there is some colour to measure it on.
+        # At the 0.05 saturation of the bottom end the colour is (190,180,182),
+        # where one unit of eight-bit rounding is already a 0.011 hue step - so
+        # below this gate the "hue" being compared is quantisation, not intent.
+        if colors.saturation_of(out) > 0.15:
             assert colors.hue_distance(rgb, out) < 0.01, f"hue moved at {step:+d}"
 
 
-def test_value_is_untouched_until_saturation_runs_out():
-    """Up to +5 this is purely a saturation control, so it must not brighten
-    anything - brightness has its own slider. Only once there is no white left
-    to remove does it start raising value."""
+def test_value_is_never_touched():
+    """This is purely a saturation control at every setting - brightness has
+    its own slider, and two controls doing the same thing would fight."""
     rgb = colors.parse_color("be3f50")
-    for step in range(-10, 6):
+    for step in range(-10, 11):
         out = colors.apply_intensity(rgb, step)
         assert max(out) == pytest.approx(max(rgb), abs=1), f"value moved at {step:+d}"
 

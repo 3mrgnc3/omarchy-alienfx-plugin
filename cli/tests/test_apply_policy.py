@@ -181,20 +181,32 @@ def test_intensity_reaches_every_mode(config_root):
     assert boosted != neutral
 
 
-def test_intensity_zero_leaves_the_pipeline_unchanged(config_root):
-    """The upgrade-safety property: a user who never touches the slider must see
-    exactly what they saw before it existed."""
+def test_the_shaping_funnel_has_exactly_one_saturation_stage(config_root):
+    """There were three - a multiplier, a `min_saturation` floor and a relative
+    trim - and they fought: the floor could lift a colour the trim had just
+    taken down, and on a typical 0.67-saturated accent the floor never engaged
+    while the trim's centre was a no-op, so the default did nothing. The
+    intensity control is now the single authority, and this pins that the funnel
+    is just "set saturation, then scale"."""
     from alienfx_ctl import engine, colors as c
     st = state.load_state()
-    st["intensity"] = 0
     for spec in ("be3f50", "3fbead", "e68e0d", "22aa66"):
         rgb = c.parse_color(spec)
-        expected = c.scale(
-            c.lift_saturation(
-                c.boost_hsv(rgb, st["saturation"], st.get("value", 1.0)),
-                st["min_saturation"]),
-            st["brightness"])
-        assert engine._shape(rgb, st) == expected
+        for intensity in (-10, 0, 7):
+            st["intensity"] = intensity
+            expected = c.scale(c.apply_intensity(rgb, intensity), st["brightness"])
+            assert engine._shape(rgb, st) == expected
+
+
+def test_the_retired_saturation_keys_no_longer_affect_anything(config_root):
+    """A state file written by an older version still carries `saturation`,
+    `value` and `min_saturation`. They must be inert, not partially honoured."""
+    from alienfx_ctl import engine
+    st = state.load_state()
+    st["intensity"] = 0
+    plain = engine._shape((190, 63, 80), st)
+    st.update(saturation=2.0, value=0.5, min_saturation=1.0)
+    assert engine._shape((190, 63, 80), st) == plain
 
 
 def test_intensity_persists_like_any_other_preference(config_root):

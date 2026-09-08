@@ -107,7 +107,7 @@ Panel {
   readonly property string selectedZone: uiZone
   readonly property int brightness: uiBrightness
 
-  // Theme-derived chrome.  // Theme-derived chrome. Falls back to the Color singleton when the widget is
+  // Theme-derived chrome. Falls back to the Color singleton when the widget is
   // rendered outside a bar host.
   readonly property color fg: root.bar ? root.bar.foreground : Color.foreground
   readonly property string fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
