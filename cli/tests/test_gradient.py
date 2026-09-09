@@ -354,3 +354,76 @@ def test_the_chassis_corners_match_the_keyboard_corners_exactly(shipped_keymap):
     assert plan["elc"]["logo"] == esc
     assert plan["elc"]["pbtn"] == corner
     assert esc != corner, "a real blend, not two ends of nothing"
+
+
+# ------------------------------------------------------- the manual path
+#
+# Every guard above runs through ThemeSync, because `themesync` defaults on and
+# that is what most users see. The manual two-picker path resolves its anchors
+# somewhere else entirely - engine.resolve_anchors reads the stored per-zone
+# colours rather than the theme - so it needs its own guards.
+
+def _manual(primary, secondary="", **over):
+    from alienfx_ctl import engine, state
+    st = dict(state.DEFAULT_STATE)
+    st.update(themesync=False, effect="gradient", brightness=255,
+              zones={zone: {"color": primary}
+                     for zone in ("kbd", "tpd", "logo", "pbtn")},
+              secondary=secondary)
+    st.update(over)
+    return engine.plan(st, ["kbd", "tpd", "logo", "pbtn"])
+
+
+def test_two_identical_pickers_give_a_flat_fill():
+    """Not a blend of a colour with itself producing rounding fringes: the same
+    colour at both ends must come out as one colour on every key, or "Gradient"
+    with one colour looks like a rendering fault."""
+    leds = _manual("be3f50", "be3f50")["kbd_leds"]
+    assert len({tuple(led[1:]) for led in leds}) == 1
+
+
+def test_a_grey_at_both_ends_stays_grey():
+    """The hue-noise floor means a neutral colour must not acquire a hue."""
+    leds = _manual("808080", "808080")["kbd_leds"]
+    values = {tuple(led[1:]) for led in leds}
+    assert len(values) == 1
+    only = values.pop()
+    assert max(only) - min(only) <= 1
+
+
+def test_an_unset_second_picker_still_blends():
+    """With no far colour chosen the complement stands in, so Gradient is a
+    gradient rather than silently behaving like Solid."""
+    leds = _manual("be3f50", "")["kbd_leds"]
+    assert len({tuple(led[1:]) for led in leds}) > 10
+
+
+def test_the_manual_path_reaches_the_chosen_colours_at_the_corners(shipped_keymap):
+    """The near corner shows picker one exactly; ThemeSync has the same
+    property but resolves its anchors from somewhere else."""
+    plan = _manual("be3f50", "3fbead")
+    leds = {index: (r, g, b) for index, r, g, b in plan["kbd_leds"]}
+    near = leds[shipped_keymap["key_to_index"]["esc"]]
+    far = leds[shipped_keymap["key_to_index"]["right"]]
+    assert plan["elc"]["tpd"] == near
+    assert plan["elc"]["pbtn"] == far
+    assert near != far
+
+
+@pytest.mark.parametrize("intensity", [-10, 0, 10])
+def test_the_intensity_control_applies_on_the_manual_path_too(intensity):
+    """It lands in the one shaping funnel, so it must work in both modes."""
+    import statistics
+    leds = _manual("be3f50", "3fbead", intensity=intensity)["kbd_leds"]
+    mean = statistics.mean(colors.saturation_of(tuple(led[1:])) for led in leds)
+    assert mean == pytest.approx(colors.intensity_saturation(intensity), abs=0.12)
+
+
+def test_zonesync_off_lets_zones_carry_their_own_colours():
+    from alienfx_ctl import engine, state
+    st = dict(state.DEFAULT_STATE)
+    st.update(themesync=False, zonesync=False, effect="solid", brightness=255,
+              zones={"kbd": {"color": "ff0000"}, "tpd": {"color": "00ff00"},
+                     "logo": {"color": "0000ff"}, "pbtn": {"color": "ffff00"}})
+    plan = engine.plan(st, ["kbd", "tpd", "logo", "pbtn"])
+    assert len(set(plan["elc"].values())) == 3, "each chassis zone kept its own"

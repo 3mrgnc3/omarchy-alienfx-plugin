@@ -384,3 +384,70 @@ def test_every_key_in_every_layout_has_a_readable_label():
             # to someone looking at their keyboard.
             assert key in layout.LABELS or (key.isalnum() and len(key) <= 3), (
                 f"{key!r} would be shown to the user as-is")
+
+
+# ------------------------------------------------ the whole round trip
+#
+# Verified by hand once and then guarded here, because every part of it can
+# pass on its own while the chain is broken: a keymap that saves to a path the
+# loader does not read presents as "the wizard ran and changed nothing".
+
+def test_pointing_at_keys_produces_a_keymap_the_renderer_then_uses(
+        config_root, shipped_keymap, monkeypatch):
+    """assign_leds -> _save -> keymap.load() -> a rendered gradient."""
+    from alienfx_ctl import engine, gradient, hardware, keymap, state
+    monkeypatch.setattr(hardware, "model", lambda: "Alienware Test 9")
+    monkeypatch.setattr(hardware, "slug", lambda text="": "test-9")
+    monkeypatch.setattr(hardware, "keymap_filename",
+                        lambda text="": "alienware-test-9-keymap.json")
+
+    grid = layout.Layout.from_keymap(shipped_keymap)
+    lit = []
+    assigned = wizard.assign_leds(
+        grid, lambda changes: lit.extend(changes),
+        term.from_sequence([term.ENTER] * len(grid.keys())),
+        lambda line: None)
+    assert len(assigned) == len(grid.keys())
+
+    assert wizard._save("Alienware Test 9", grid, assigned, {"logo": 0, "pbtn": 4}) == 0
+
+    # The loader must find it without being told where to look.
+    assert keymap.has_user_keymap() is True
+    loaded = keymap.load()
+    assert loaded["device"] == "Alienware Test 9"
+    assert loaded["key_to_index"] == assigned
+
+    # And the renderer must be able to drive it.
+    leds = gradient.render_kbd(loaded, (255, 0, 0), (0, 0, 255))
+    assert len(leds) == len(assigned)
+    assert keymap.zones(loaded) == {"logo": [0], "pbtn": [4]}
+
+    st = dict(state.DEFAULT_STATE)
+    st.update(brightness=255, effect="gradient")
+    plan = engine.plan(st, ["kbd", "logo", "pbtn"])
+    assert plan["kbd_leds"] and set(plan["elc"]) == {"logo", "pbtn"}
+
+
+def test_the_wizard_records_the_product_id_it_actually_found(config_root, monkeypatch):
+    """Product ids differ across models, so writing a constant would mislabel
+    every keymap made on other hardware."""
+    from alienfx_ctl import device, hardware
+    monkeypatch.setattr(hardware, "slug", lambda text="": "test-9")
+    monkeypatch.setattr(device, "node_ids", lambda controller: (0x0D62, 0xCABC))
+    grid = layout.Layout.from_rows([["esc", "f1"]])
+    assert wizard._save("Test", grid, {"esc": 0}, {}) == 0
+    import json
+    from alienfx_ctl import keymap
+    written = json.load(open(keymap.model_keymap_path("Test")))
+    assert written["vid_pid"] == "0d62:cabc"
+
+
+def test_a_keymap_saved_without_a_detectable_device_still_loads(config_root, monkeypatch):
+    """The wizard can be run to import a layout on a machine whose controller
+    is not present. That should not produce an unloadable file."""
+    from alienfx_ctl import device, hardware, keymap
+    monkeypatch.setattr(hardware, "slug", lambda text="": "test-9")
+    monkeypatch.setattr(device, "node_ids", lambda controller: None)
+    grid = layout.Layout.from_rows([["esc", "f1"]])
+    assert wizard._save("Test", grid, {"esc": 0}, {}) == 0
+    keymap.validate(keymap.load_file(keymap.model_keymap_path("Test")))
