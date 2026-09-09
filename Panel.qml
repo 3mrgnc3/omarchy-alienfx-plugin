@@ -124,14 +124,23 @@ Panel {
 
   // Absolute paths: the shell process does not necessarily carry ~/.local/bin
   // on PATH, so resolving by name would work for some users and not others.
-  // `cliPath` is settled at runtime by cliResolver below, preferring an
+  // Settings come from this widget's shell.json entry via the BarWidget base.
+  // `||` rather than `setting`'s own fallback because that only substitutes for
+  // undefined and null: the manifest declares these as empty strings meaning
+  // "use the built-in default", and a settings form that clears a field hands
+  // back "" too. Without this an emptied path would silently become the CLI
+  // path and nothing would work.
+  //
+  // `cliPath` is then settled at runtime by cliResolver below, preferring an
   // installed CLI and falling back to the bundled one.
-  property string cliPath: setting("cliPath", Quickshell.env("HOME") + "/.local/bin/alienfx-ctl")
+  property string cliPath: setting("cliPath", "")
+    || (Quickshell.env("HOME") + "/.local/bin/alienfx-ctl")
   property bool cliResolved: false
   readonly property string bundledCli: pluginDir + "/cli/bin/alienfx-ctl"
   readonly property string bundledInstaller: pluginDir + "/install.sh"
-  readonly property string wizardPath: setting("wizardPath", Quickshell.env("HOME") + "/.local/bin/omarchy-alienfx-wizard")
-  readonly property string iconGlyph: setting("icon", Model.ICON.alien)
+  readonly property string wizardPath: setting("wizardPath", "")
+    || (Quickshell.env("HOME") + "/.local/bin/omarchy-alienfx-wizard")
+  readonly property string iconGlyph: setting("icon", "") || Model.ICON.alien
 
   // Setup is unfinished in either of two ways, and they look identical from
   // the outside: there is no CLI at all, or there is one but the udev rule was

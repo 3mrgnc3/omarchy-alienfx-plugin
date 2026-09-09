@@ -2,20 +2,51 @@
   "schemaVersion": 1,
   "id": "mrgnc.alienfx",
   "name": "AlienFX",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "3mrgnc3",
-  "description": "Alienware RGB zone control with a theme-synced diagonal gradient",
+  "license": "MIT",
+  "description": "Alienware RGB lighting with a theme-synced diagonal gradient across the keyboard and chassis zones.",
   "kinds": [
     "bar-widget"
   ],
+  "activation": "on-demand",
   "entryPoints": {
     "barWidget": "Panel.qml"
   },
   "barWidget": {
     "displayName": "AlienFX",
-    "description": "Alienware RGB zone control with a theme-synced diagonal gradient",
+    "description": "One bar icon and one panel: per-key keyboard gradient, chassis zones, brightness and vibrancy, firmware effects, saved profiles, and a guided keymap wizard for any Alienware model.",
     "category": "System",
+    "aliases": ["alienfx", "alienware", "rgb", "keyboard-lighting"],
     "defaultSection": "right",
-    "allowMultiple": false
+    "allowMultiple": false,
+    "defaults": {
+      "cliPath": "",
+      "wizardPath": "",
+      "icon": ""
+    },
+    "schema": [
+      {
+        "key": "cliPath",
+        "type": "path",
+        "label": "alienfx-ctl path",
+        "defaultValue": "",
+        "description": "Leave empty to use ~/.local/bin/alienfx-ctl, where the installer puts it."
+      },
+      {
+        "key": "wizardPath",
+        "type": "path",
+        "label": "KeyMap Wizard path",
+        "defaultValue": "",
+        "description": "Leave empty to use ~/.local/bin/omarchy-alienfx-wizard."
+      },
+      {
+        "key": "icon",
+        "type": "string",
+        "label": "Bar icon",
+        "defaultValue": "",
+        "description": "A single glyph for the bar. Leave empty for the alien head."
+      }
+    ]
   }
 }

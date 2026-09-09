@@ -29,19 +29,109 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the plugin manifest is valid JSON and well-formed
+      - name: Check the plugin manifest against what Omarchy requires
+        run: |
+          python3 - <<'PY'
+          import json, os
+
+          m = json.load(open("manifest.json"))
+
+          # PluginRegistry.validateManifest rejects a manifest outright if any
+          # of these are missing or schemaVersion is not 1, and the only symptom
+          # is a plugin that silently never loads.
+          assert m.get("schemaVersion") == 1, "schemaVersion must be exactly 1"
+          for key in ("id", "name", "version", "kinds", "entryPoints"):
+              assert key in m, f"manifest missing required field: {key}"
+          assert isinstance(m["kinds"], list) and m["kinds"], "kinds must be a non-empty list"
+          assert isinstance(m["entryPoints"], dict), "entryPoints must be an object"
+
+          plugin_id = str(m["id"])
+          assert plugin_id, "id must not be empty"
+          assert "/" not in plugin_id and ".." not in plugin_id, "id must not contain / or .."
+          assert not plugin_id.startswith("/"), "id must not be absolute"
+          assert plugin_id.count(".") == 1, "id must be <author>.<name>"
+
+          for kind, entry in m["entryPoints"].items():
+              assert not os.path.isabs(entry), f"{kind} entry point must be relative"
+              assert ".." not in entry, f"{kind} entry point must not contain .."
+              assert os.path.isfile(entry), f"{kind} entry point {entry} not found"
+
+          for key in ("author", "license", "description", "version"):
+              assert m.get(key), f"manifest should declare {key} for submission"
+
+          widget = m.get("barWidget") or {}
+          if "defaultSection" in widget:
+              assert widget["defaultSection"] in ("left", "center", "right"), \
+                  "defaultSection must be left, center or right"
+
+          print(f"manifest OK: {plugin_id} v{m['version']} -> {m['entryPoints']}")
+          PY
+
+      - name: Check declared settings match the settings the QML reads
+        run: |
+          python3 - <<'PY'
+          import json, re
+
+          m = json.load(open("manifest.json"))
+          widget = m.get("barWidget") or {}
+          declared = {f["key"] for f in widget.get("schema", [])}
+          defaults = set(widget.get("defaults") or {})
+          read = set(re.findall(r'setting\(\s*"([^"]+)"', open("Panel.qml").read()))
+
+          # A setting the QML reads but the manifest never declares cannot be
+          # configured; one declared but never read is a lie in the settings
+          # form. Both fail silently.
+          assert not (read - declared), f"read but not declared: {sorted(read - declared)}"
+          assert not (declared - read), f"declared but never read: {sorted(declared - read)}"
+          assert declared == defaults, f"schema and defaults disagree: {sorted(declared ^ defaults)}"
+          print(f"settings OK: {sorted(declared)}")
+          PY
+
+      - name: Check the bundled keyboard layouts
         run: |
           python3 - <<'PY'
           import json, sys
-          m = json.load(open("manifest.json"))
-          required = ["schemaVersion", "id", "name", "version", "kinds", "entryPoints"]
-          missing = [k for k in required if k not in m]
-          assert not missing, f"manifest missing: {missing}"
-          assert m["id"].count(".") == 1, "plugin id must be <author>.<name>"
-          entry = m["entryPoints"]["barWidget"]
-          import os
-          assert os.path.isfile(entry), f"entry point {entry} not found"
-          print(f"manifest OK: {m['id']} -> {entry}")
+          sys.path.insert(0, "cli/src")
+
+          raw = json.load(open("cli/src/alienfx_ctl/data/layouts.json"))
+          layouts = raw["layouts"]
+          assert layouts, "no bundled layouts"
+
+          for name, spec in layouts.items():
+              assert spec.get("label"), f"{name}: no label to show the user"
+              assert "verified" in spec, f"{name}: must say whether it was tested"
+              assert spec.get("source"), f"{name}: must say where it came from"
+              seen = set()
+              for row in spec["rows"]:
+                  assert row, f"{name}: empty row"
+                  for entry in row:
+                      # Shapes only. An LED index is never bundled: they are
+                      # irregular on real hardware and cannot be inferred, and a
+                      # wrong one silently lights the wrong key.
+                      assert len(entry) == 2, f"{name}: unexpected field in {entry}"
+                      key, col = entry
+                      assert isinstance(key, str) and key, f"{name}: bad key {key!r}"
+                      assert isinstance(col, int) and col >= 0, f"{name}: bad column {col!r}"
+                      assert key not in seen, f"{name}: {key} appears twice"
+                      seen.add(key)
+
+          from alienfx_ctl import layout
+          for name in layouts:
+              for key in layout.load_bundled(name).keys():
+                  assert key in layout.LABELS or (key.isalnum() and len(key) <= 3), \
+                      f"{name}: {key!r} would be shown to the user as-is"
+
+          print(f"layouts OK: {', '.join(sorted(layouts))}")
+          PY
+
+      - name: Check the shipped keymap is valid
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          sys.path.insert(0, "cli/src")
+          from alienfx_ctl import keymap
+          data = keymap.validate(json.load(open(keymap.SHIPPED_KEYMAP)))
+          print(f"shipped keymap OK: {keymap.describe(data)}")
           PY
 
       - name: Reject symlinks (Omarchy refuses them inside a plugin folder)
