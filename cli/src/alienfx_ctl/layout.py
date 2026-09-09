@@ -52,10 +52,14 @@ _NAME = 4
 class Layout:
     """Rows of ``(name, column)`` pairs, ordered left to right within a row."""
 
-    def __init__(self, rows):
+    def __init__(self, rows, hints=None):
         self.rows = [list(row) for row in rows if row]
         if not self.rows:
             raise LayoutError("layout has no rows")
+        #: ``{key: fn-legend}``, e.g. ``f7 -> kbd_backlight``. Shown while
+        #: mapping, because "F7" alone is not how anyone identifies the key
+        #: they are looking at. Carried through so a re-run does not lose it.
+        self.hints = dict(hints or {})
 
     # ----------------------------------------------------------- building
 
@@ -73,8 +77,11 @@ class Layout:
         for name, position in positions.items():
             row, col = gradient._row_col(position)
             by_row.setdefault(row, []).append((name, col))
+        hints = {key: str(value)
+                 for key, value in ((data or {}).get("secondary_functions") or {}).items()
+                 if value and str(value).strip() not in ("", ".")}
         return cls([sorted(by_row[row], key=lambda pair: pair[1])
-                    for row in sorted(by_row)])
+                    for row in sorted(by_row)], hints)
 
     @classmethod
     def from_rows(cls, rows):
@@ -204,8 +211,26 @@ def bundled() -> dict:
 
 
 def load_bundled(name: str) -> "Layout":
-    """Build a layout from the bundled set."""
+    """Build a layout from the bundled set.
+
+    Fn legends come from the shipped keymap rather than being repeated in
+    layouts.json - every bundled shape derives from that keyboard, so there is
+    one description of what each key also does. Keys the reference does not have
+    (a numeric keypad) simply have no legend.
+    """
     spec = bundled().get(name)
     if spec is None:
         raise LayoutError(f"no bundled layout named {name!r}")
-    return Layout([[(key, int(col)) for key, col in row] for row in spec["rows"]])
+    return Layout(
+        [[(key, int(col)) for key, col in row] for row in spec["rows"]],
+        reference_hints(),
+    )
+
+
+def reference_hints() -> dict:
+    """The Fn legends of the reference keyboard, if they can be read."""
+    from . import keymap
+    try:
+        return Layout.from_keymap(keymap.load_file(keymap.SHIPPED_KEYMAP)).hints
+    except Exception:
+        return {}

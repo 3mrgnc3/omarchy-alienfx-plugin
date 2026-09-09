@@ -107,6 +107,12 @@ def test_the_cursor_and_assigned_keys_are_visible_in_the_drawing(shipped_keymap)
 # ------------------------------------------------------- the mapping flow
 
 @pytest.fixture()
+def grid_with_hints():
+    """A small grid whose first key carries an Fn legend."""
+    return layout.Layout([[("f7", 0)], [("f8", 0)]], {"f7": "kbd_backlight"})
+
+
+@pytest.fixture()
 def grid():
     """A small grid, so a scripted run stays readable."""
     return layout.Layout.from_rows([["esc", "f1", "f2"], ["a", "s", "d"]])
@@ -451,3 +457,104 @@ def test_a_keymap_saved_without_a_detectable_device_still_loads(config_root, mon
     grid = layout.Layout.from_rows([["esc", "f1"]])
     assert wizard._save("Test", grid, {"esc": 0}, {}) == 0
     keymap.validate(keymap.load_file(keymap.model_keymap_path("Test")))
+
+
+# ---------------------------------------------------------- the Fn legends
+#
+# secondary_functions sat in the shipped keymap read by nothing, and a wizard
+# re-run dropped it silently - so the bundled keymap was richer than anything
+# the wizard could produce. It is real data about the keyboard, and it is
+# exactly the kind of hint that makes a key identifiable: "F7" alone is not how
+# anyone finds the key they are looking at.
+
+def test_the_reference_layout_carries_the_fn_legends():
+    grid = layout.load_bundled("m16-r2")
+    assert grid.hints["f7"] == "kbd_backlight"
+    assert grid.hints["f12"] == "touchpad_toggle"
+    assert len(grid.hints) > 20
+
+
+def test_placeholder_legends_are_not_carried():
+    """The shipped file uses "." for keys with no secondary function; showing
+    that to the user would be worse than showing nothing."""
+    grid = layout.load_bundled("m16-r2")
+    assert "esc" not in grid.hints
+    assert all(value.strip() not in ("", ".") for value in grid.hints.values())
+
+
+def test_legends_come_from_the_keymap_not_from_layouts_json():
+    """One description of what each key also does. layouts.json carries shapes
+    only, so it cannot drift from the keymap on this."""
+    import json
+    with open(layout.BUNDLED_LAYOUTS, encoding="utf-8") as handle:
+        raw = json.load(handle)
+    assert "secondary_functions" not in json.dumps(raw)
+    assert layout.load_bundled("m16-r2").hints, "but they still arrive"
+
+
+def test_a_key_the_reference_lacks_simply_has_no_legend():
+    grid = layout.load_bundled("numpad")
+    assert "kp5" not in grid.hints
+    assert grid.hints.get("f7") == "kbd_backlight"
+
+
+def test_the_legend_is_shown_while_mapping(grid_with_hints):
+    lines = []
+    wizard.assign_leds(grid_with_hints, lambda changes: None,
+                       term.from_sequence(["q"]), lines.append)
+    assert any("Fn: kbd_backlight" in line for line in lines)
+
+
+def test_a_key_without_a_legend_shows_no_bracket(grid_with_hints):
+    lines = []
+    wizard.assign_leds(grid_with_hints, lambda changes: None,
+                       term.from_sequence([term.DOWN, "q"]), lines.append)
+    shown = [line for line in lines if "Find this key" in line][-1]
+    assert "Fn:" not in shown
+
+
+def test_a_re_run_preserves_the_legends(config_root, monkeypatch):
+    """The actual bug: they were silently dropped on save."""
+    import json
+    from alienfx_ctl import hardware, keymap
+    monkeypatch.setattr(hardware, "slug", lambda text="": "test-9")
+    grid = layout.load_bundled("m16-r2")
+    assigned = {name: index for index, name in enumerate(grid.keys())}
+    assert wizard._save("Test", grid, assigned, {}) == 0
+    written = json.load(open(keymap.model_keymap_path("Test")))
+    assert written["secondary_functions"]["f7"] == "kbd_backlight"
+
+
+def test_only_the_legends_of_mapped_keys_are_written(config_root, monkeypatch):
+    from alienfx_ctl import hardware, keymap
+    monkeypatch.setattr(hardware, "slug", lambda text="": "test-9")
+    grid = layout.load_bundled("m16-r2")
+    assert wizard._save("Test", grid, {"f7": 0}, {}) == 0
+    import json
+    written = json.load(open(keymap.model_keymap_path("Test")))
+    assert set(written["secondary_functions"]) == {"f7"}
+
+
+def test_a_layout_with_no_legends_omits_the_field_entirely(config_root, monkeypatch):
+    from alienfx_ctl import hardware, keymap
+    monkeypatch.setattr(hardware, "slug", lambda text="": "test-9")
+    grid = layout.Layout.from_rows([["esc", "f1"]])
+    assert wizard._save("Test", grid, {"esc": 0}, {}) == 0
+    import json
+    written = json.load(open(keymap.model_keymap_path("Test")))
+    assert "secondary_functions" not in written
+
+
+def test_the_shipped_keymap_survives_a_full_round_trip(config_root, shipped_keymap, monkeypatch):
+    """Load the reference keymap, re-save it through the wizard, and get the
+    same legends back - so re-running the wizard is lossless."""
+    import json
+    from alienfx_ctl import hardware, keymap
+    monkeypatch.setattr(hardware, "slug", lambda text="": "m16-r2")
+    grid = layout.Layout.from_keymap(shipped_keymap)
+    assert wizard._save("Alienware m16 R2", grid,
+                        dict(shipped_keymap["key_to_index"]), {}) == 0
+    written = json.load(open(keymap.model_keymap_path("Alienware m16 R2")))
+    original = {k: v for k, v in shipped_keymap["secondary_functions"].items()
+                if v and v.strip() != "."}
+    assert written["secondary_functions"] == original

@@ -251,7 +251,9 @@ def assign_leds(grid, paint, read_key, echo, max_index=_MAX_INDEX,
         echo(f"  Row {row_index + 1}   key {position + 1} of {len(keys)}"
              f"   ({len(assigned)} saved)")
         echo("")
-        echo(f"      Find this key:   >>>  {layout.label_for(name)}  <<<")
+        hint = grid.hints.get(name)
+        echo(f"      Find this key:   >>>  {layout.label_for(name)}  <<<"
+             + (f"      (Fn: {hint})" if hint else ""))
         echo("")
         echo(f"      The RED light is on LED {candidate}."
              + (f"   [saved as {assigned[name]}]" if name in assigned else ""))
@@ -445,6 +447,12 @@ def _save(model_name, grid, assigned, zones) -> int:
         "grid_positions": {name: positions[name] for name in assigned if name in positions},
         "total_mapped": len(assigned),
     }
+    # Carried, not regenerated. The legends are real data about the keyboard and
+    # a re-run used to drop them silently, leaving the shipped keymap richer
+    # than anything the wizard could produce.
+    legends = {name: grid.hints[name] for name in assigned if name in grid.hints}
+    if legends:
+        data["secondary_functions"] = legends
     if zones:
         data["zones"] = zones
 
