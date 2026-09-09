@@ -24,6 +24,28 @@ jobs:
         working-directory: cli
         run: python -m pytest tests -q
 
+      - name: Check the README's test count is current
+        run: |
+          python3 - <<'PY'
+          import re, subprocess
+
+          # This lives in the test job because it is the only one with pytest
+          # installed; in the lint job the collect step produced no output at
+          # all and the check failed on an empty match.
+          out = subprocess.run(["python", "-m", "pytest", "tests", "-q", "--collect-only"],
+                               cwd="cli", capture_output=True, text=True).stdout
+          found = re.search(r"(\d+) tests? collected", out)
+          assert found, f"could not read a test count from pytest:\n{out[-500:]}"
+          actual = int(found.group(1))
+
+          claimed = {int(n) for n in re.findall(r"(\d+) tests?, no hardware",
+                                                open("README.md").read())}
+          # A stale count is small, but it quietly tells a reader the docs are
+          # not maintained.
+          assert claimed == {actual}, f"README claims {claimed}, actual {actual}"
+          print(f"README test count OK: {actual}")
+          PY
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -161,19 +183,4 @@ jobs:
           # `alienfx-ctl --version` - so a mismatch makes bug reports ambiguous.
           assert manifest == cli, f"manifest {manifest} != CLI {cli}"
           print(f"version OK: {cli}")
-          PY
-
-      - name: Check the README's test count is current
-        run: |
-          python3 - <<'PY'
-          import re, subprocess
-          out = subprocess.run(["python3", "-m", "pytest", "tests", "-q", "--collect-only"],
-                               cwd="cli", capture_output=True, text=True).stdout
-          actual = int(re.search(r"(\d+) tests? collected", out).group(1))
-          readme = open("README.md").read()
-          claimed = {int(n) for n in re.findall(r"(\d+) tests?, no hardware", readme)}
-          # A stale count is a small thing that quietly tells a reader the docs
-          # are not maintained.
-          assert claimed == {actual}, f"README claims {claimed}, actual {actual}"
-          print(f"README test count OK: {actual}")
           PY
