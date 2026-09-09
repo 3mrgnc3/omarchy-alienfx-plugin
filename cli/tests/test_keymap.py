@@ -154,3 +154,94 @@ def test_every_named_key_has_a_grid_position():
     reads as one key being the wrong colour."""
     data = keymap.load_file(keymap.SHIPPED_KEYMAP)
     assert set(data["key_to_index"]) == set(data["grid_positions"])
+
+
+# ------------------------------------------- keyboards lit as chassis zones
+#
+# Most older Alienware laptops light the keyboard as four APIv4 zones and have
+# no APIv5 controller at all. Deliberately not a special case: such a machine is
+# one with more chassis zones and no keyboard, so nothing downstream branches on
+# it - device.zone_names() simply omits "kbd", and gradient.elc_samples already
+# spreads unfamiliar zone names along the blend axis.
+
+ZONED = {
+    "device": "Alienware m15 R1",
+    "keyboard": "zones",
+    "zones": {"kb1": [2], "kb2": [3], "kb3": [4], "kb4": [5],
+              "logo": [1], "pbtn": [0]},
+}
+
+
+def test_a_zone_only_keymap_validates_without_per_key_data():
+    assert keymap.validate(dict(ZONED)) == ZONED
+
+
+def test_a_zone_only_keymap_still_needs_some_zones():
+    """Otherwise it describes nothing at all."""
+    with pytest.raises(keymap.KeymapError):
+        keymap.validate({"keyboard": "zones", "zones": {}})
+    with pytest.raises(keymap.KeymapError):
+        keymap.validate({"keyboard": "zones"})
+
+
+def test_a_per_key_keymap_still_requires_per_key_data():
+    """The default must not have been loosened by adding the other kind."""
+    with pytest.raises(keymap.KeymapError):
+        keymap.validate({"zones": {"logo": [1]}})
+
+
+def test_an_unknown_keyboard_kind_is_refused():
+    with pytest.raises(keymap.KeymapError):
+        keymap.validate({"keyboard": "telepathy", "zones": {"logo": [1]}})
+
+
+def test_a_keymap_with_no_keyboard_field_is_per_key(shipped_keymap):
+    """Every keymap written before this field existed is per-key."""
+    assert "keyboard" not in shipped_keymap
+    assert keymap.has_per_key_keyboard(shipped_keymap) is True
+    assert keymap.keyboard_kind(shipped_keymap) == keymap.KEYBOARD_PER_KEY
+
+
+def test_a_zone_only_keymap_reports_itself_as_such():
+    assert keymap.has_per_key_keyboard(ZONED) is False
+    assert keymap.keyboard_kind(ZONED) == keymap.KEYBOARD_ZONES
+
+
+def test_the_zone_order_is_preserved_because_it_sets_the_blend_order():
+    """With no per-key data, the order zones are declared in is the only
+    control anyone has over how the gradient travels through them."""
+    assert list(keymap.zones(ZONED)) == ["kb1", "kb2", "kb3", "kb4", "logo", "pbtn"]
+
+
+def test_such_a_machine_has_no_kbd_zone(config_root, monkeypatch):
+    """Including one would make every apply try to open an APIv5 controller the
+    machine does not contain."""
+    from alienfx_ctl import device
+    monkeypatch.setattr(keymap, "load", lambda: dict(ZONED))
+    names = device.zone_names()
+    assert "kbd" not in names
+    assert set(names) == set(ZONED["zones"])
+
+
+def test_such_a_machine_gets_a_gradient_across_its_keyboard_zones(config_root, monkeypatch):
+    """The whole point: no code change, just data."""
+    from alienfx_ctl import device, engine, state
+    monkeypatch.setattr(keymap, "load", lambda: dict(ZONED))
+    st = dict(state.DEFAULT_STATE)
+    st.update(brightness=255, intensity=0, effect="gradient")
+    plan = engine.plan(st, list(device.zone_names()))
+    assert plan["kbd_leds"] is None, "there is no per-key keyboard to render"
+    assert set(plan["elc"]) == set(ZONED["zones"])
+    assert len(set(plan["elc"].values())) >= 4, "a real blend, not a flat fill"
+
+
+def test_the_wizard_can_write_one(config_root, monkeypatch):
+    """A machine with no per-key controller can still be described."""
+    import json
+    from alienfx_ctl import hardware, wizard
+    monkeypatch.setattr(hardware, "slug", lambda text="": "m15-r1")
+    assert wizard._save_zoned("Alienware m15 R1", ZONED["zones"]) == 0
+    written = json.load(open(keymap.model_keymap_path("Alienware m15 R1")))
+    keymap.validate(written)
+    assert written["keyboard"] == "zones"
+    assert list(written["zones"]) == list(ZONED["zones"])

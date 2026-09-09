@@ -158,9 +158,12 @@ def plan(st, zones=None) -> dict:
         # construction however non-linear the shaping that produced them.
         near, far = _shape(first, st), _shape(second, st)
 
-        keymap_data = keymap.load()
-        leds = gradient.render_kbd(keymap_data, near, far, axis)
-        if "kbd" in targets:
+        # A machine whose keyboard is chassis zones has no per-key data to
+        # render, and render_kbd would raise on it.
+        keymap_data = keymap.load() if keymap.has_per_key_keyboard() else {}
+        leds = (gradient.render_kbd(keymap_data, near, far, axis)
+                if keymap_data else [])
+        if leds and "kbd" in targets:
             result["kbd_leds"] = leds
 
         samples = gradient.elc_samples(near, far, list(zone_ids))

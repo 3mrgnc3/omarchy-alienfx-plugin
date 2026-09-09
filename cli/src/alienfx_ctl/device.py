@@ -278,11 +278,18 @@ def zone_names() -> tuple:
     unfamiliar zone names evenly along the blend axis, such a machine gets a
     working theme gradient for free.
 
+    A machine whose keyboard is lit as chassis zones rather than per key has no
+    ``kbd`` zone at all: its four keyboard zones appear in the chassis list
+    instead. Including ``kbd`` there anyway would make every apply try to open
+    an APIv5 controller the machine does not contain.
+
     Not cached. A keymap read is 0.17ms measured, which is nothing against the
     63ms an actual chassis packet costs, and this project has twice been bitten
     by caching state that then went stale.
     """
-    return (KBD_ZONE,) + elc_zone_names()
+    from . import keymap
+    chassis = elc_zone_names()
+    return ((KBD_ZONE,) + chassis) if keymap.has_per_key_keyboard() else chassis
 
 
 def needs_kbd(zones) -> bool:

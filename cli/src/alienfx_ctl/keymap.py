@@ -17,6 +17,22 @@ from .apiv5 import KBD_LED_COUNT
 SHIPPED_KEYMAP = os.path.join(os.path.dirname(__file__), "data", "m16r2-keymap.json")
 
 _REQUIRED_KEYS = ("key_to_index", "grid_positions")
+
+#: What kind of keyboard a machine has.
+#:
+#: Most older Alienware laptops light the keyboard as **four APIv4 zones**, not
+#: per key - there is no APIv5 controller in them at all. Such a machine is not
+#: a special case to be branched around: it is simply a machine with more
+#: chassis zones and no keyboard, so its keymap lists ``kb1``..``kb4`` in
+#: ``zones`` alongside the logo and power button, and everything downstream
+#: already works. ``gradient.elc_samples`` even spreads them along the blend
+#: axis, so it gets a theme gradient across the four.
+#:
+#: Declared rather than probed, so the answer does not change when a controller
+#: is briefly missing. Absent means per-key, which is what every keymap written
+#: before this existed is.
+KEYBOARD_PER_KEY = "per-key"
+KEYBOARD_ZONES = "zones"
 _MAX_LED_INDEX = 199
 
 
@@ -90,6 +106,22 @@ def validate(data) -> dict:
     """
     if not isinstance(data, dict):
         raise KeymapError("keymap must be a JSON object")
+
+    kind = str(data.get("keyboard") or KEYBOARD_PER_KEY)
+    if kind not in (KEYBOARD_PER_KEY, KEYBOARD_ZONES):
+        raise KeymapError(
+            f"unknown keyboard kind {kind!r} (expected "
+            f"{KEYBOARD_PER_KEY!r} or {KEYBOARD_ZONES!r})")
+
+    if kind == KEYBOARD_ZONES:
+        # No per-key data to check - the keyboard is chassis zones - but there
+        # had better be some zones, or the keymap describes nothing at all.
+        declared = data.get("zones")
+        if not isinstance(declared, dict) or not declared:
+            raise KeymapError(
+                f"a '{KEYBOARD_ZONES}' keymap needs a non-empty 'zones' object")
+        return data
+
     for key in _REQUIRED_KEYS:
         if not isinstance(data.get(key), dict) or not data[key]:
             raise KeymapError(f"keymap is missing a non-empty '{key}' object")
@@ -146,6 +178,21 @@ def import_file(source: str, model: str = "") -> str:
     state.ensure_dirs()
     state.write_json_atomic(target, data)
     return target
+
+
+def keyboard_kind(data=None) -> str:
+    """Whether this machine's keyboard is per-key or a set of chassis zones."""
+    if data is None:
+        try:
+            data = load()
+        except KeymapError:
+            return KEYBOARD_PER_KEY
+    return str((data or {}).get("keyboard") or KEYBOARD_PER_KEY)
+
+
+def has_per_key_keyboard(data=None) -> bool:
+    """True unless the keymap says the keyboard is lit as chassis zones."""
+    return keyboard_kind(data) != KEYBOARD_ZONES
 
 
 def zones(data=None) -> dict:

@@ -412,7 +412,17 @@ def create_new() -> int:
     try:
         fds = device.open_fds(["kbd"])
     except device.DeviceError as exc:
-        print(f"cannot open the keyboard controller: {exc}", file=sys.stderr)
+        # Most older Alienware laptops light the keyboard as four chassis zones
+        # and have no per-key controller at all. There is nothing to map on
+        # such a machine, but it can still be described - and with its zones
+        # recorded it gets a theme gradient across them.
+        print()
+        print(f"  No per-key keyboard controller: {exc}")
+        print("  Some models light the keyboard as four zones instead.")
+        if zones and _yes("  Save a zone-only keymap for this machine?"):
+            return _save_zoned(model_name, zones)
+        print("  nothing saved - probe the chassis zones first "
+              "(re-run and answer yes to the zone probe).", file=sys.stderr)
         return 1
 
     def paint(changes):
@@ -444,6 +454,31 @@ def create_new() -> int:
         return 1
 
     return _save(model_name, grid, assigned, zones)
+
+
+def _save_zoned(model_name, zones) -> int:
+    """Write a keymap for a machine whose keyboard is chassis zones.
+
+    Not a special case downstream: such a machine is simply one with more
+    chassis zones and no keyboard, so nothing branches on it. The order the
+    zones are listed in is the order the gradient travels through them, which
+    is the only control anyone has over the blend without per-key data.
+    """
+    data = {
+        "device": model_name,
+        "model_slug": hardware.slug(model_name),
+        "keyboard": keymap.KEYBOARD_ZONES,
+        "zones": dict(zones),
+        "total_mapped": 0,
+    }
+    keymap.validate(data)
+    state.ensure_dirs()
+    target = keymap.model_keymap_path(model_name)
+    state.write_json_atomic(target, data)
+    print()
+    print(f"  Saved {len(zones)} zones -> {target}")
+    print("  The theme gradient will travel through them in the order above.")
+    return 0
 
 
 def _kbd_vid_pid() -> str:
