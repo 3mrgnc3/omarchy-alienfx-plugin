@@ -123,29 +123,56 @@ nodes lose it at the next reboot or replug.
 
 ## The gradient
 
-Only the keyboard is addressable per key, so it carries the real gradient: each key's row
-and column are normalised against the keymap extent and averaged for the `tl-br`
-diagonal (`t = (row_t + col_t) / 2`), then the two anchor colours are interpolated in
-sRGB. Interpolating in sRGB rather than linear space is deliberate — it guarantees the
-endpoints are exactly the colours you chose.
+Only the keyboard is addressable per key, so it carries the real gradient. Each key's row
+and column are normalised against the keymap extent and averaged for the `tl-br` diagonal
+(`t = (row_t + col_t) / 2`).
 
-The three chassis zones hold one colour each and are sampled at fixed points on that same
-axis, which is what makes the whole chassis read as one blend:
+**The blend holds near each anchor and crosses over quickly through the middle.** An
+evenly-spaced blend looked wrong, and not because of the colour maths: key density along
+the diagonal peaks in the middle — 43 of 85 keys sit between `t=0.4` and `t=0.6`, and three
+keys sit at the two extremes — so an even ramp spends most of its *surface* on the
+intermediate hues. Measured before easing, 73 of 85 keys were mid-blend and each chosen
+colour showed on about six. An S-curve on the blend position takes that to 30 / 35 / 20.
 
-| Zone | `t` |
-|---|---|
-| Lid logo | `0.00` |
-| Touchpad | `0.50` |
-| Power button | `1.00` |
+**Interpolation is gamut-mapped OkLCh**, holding chroma and rotating hue the short way
+round. A straight line through Oklab's `a`/`b` passes close to neutral between two
+well-separated hues, so the keyboard averaged only 47% of the saturation its anchors were
+set to and no amount of saturating them could lift it. Holding chroma removes that ceiling
+(47% → 94%), at the cost of travelling *through* the intervening hues rather than
+desaturating past them: red to teal goes by way of orange and yellow, not by way of grey.
+Chroma is fitted to the sRGB gamut per key — clipping channels instead is what made an
+earlier attempt come out olive. Endpoints are returned byte-exactly, so the corner keys are
+always the colours you chose.
+
+The chassis zones take the **exact colour of the corner key** they sit beside rather than a
+fixed point on the axis: the touchpad matches `esc`, the power button matches the
+bottom-right key. Sampling `t=1.0` is not good enough — the right arrow sits at `t=0.969`,
+because the media keys reach a wider column.
 
 Anchors come from the theme's `colors.toml`. The near end is the theme's `accent`; the far
-end is chosen automatically as its most hue-distant saturated colour, so the blend reads
-as a real gradient on any palette. A near-monochrome theme has no distant hue to offer, so
-a complement is synthesised instead of collapsing to a flat fill.
+end is its most hue-distant saturated colour, so the blend reads as a real gradient on any
+palette. A near-monochrome theme has no distant hue to offer, so a complement is
+synthesised rather than collapsing to a flat fill.
 
-Keycaps sit behind a diffuser that visibly desaturates them, so a saturation multiplier
-(default `2.4`) is applied before brightness scaling. Tune it with
-`alienfx-ctl set --saturation N`.
+### Intensity
+
+Keycaps sit behind a diffuser that mixes white into everything, so a colour that looks
+right on screen reads washed out on the keys. **Intensity** is an absolute saturation
+target and the only saturation control — it replaced a multiplier, a floor and a relative
+trim that overlapped and fought each other:
+
+| slider | saturation | keyboard delivers |
+|---|---|---|
+| −10 | 0.40 | 0.41 — muted |
+| 0 | 0.85 | 0.86 — the default, calibrated by eye on hardware |
+| +10 | 1.00 | 0.94 — as vivid as sRGB allows |
+
+Two straight segments meeting at the centre, so each half is evenly spaced. It applies in
+every mode, because it lands in the one shaping funnel. `alienfx-ctl set --intensity N`.
+
+It is applied to the **two anchor colours**, never to each interpolated key. Doing the
+latter collapsed the blend into three flat bands, because the trim clamps and clamping
+every key erases the saturation ramp a blend is made of.
 
 ## CLI
 
@@ -194,35 +221,82 @@ boot-time race and is not one. The previous generation of this tool shipped its 
 Verify with `ls -la /dev/hidraw*` — a trailing `+` on the permissions means the ACL is
 there.
 
-## Device numbering
+## Device detection
 
-Node numbers are resolved by USB vendor/product id at runtime, never hard-coded. This is
-not hypothetical: on the development laptop `/dev/hidraw0` is a security key, and the
-older tooling's hard-coded `hidraw0`/`hidraw1` would have aimed chassis packets at it.
-`ALIENFX_ELC_DEV` / `ALIENFX_KBD_DEV` can pin a node by hand; an override still has to
-pass the identity check.
+Controllers are found by **USB vendor id plus HID report shape**, never by product id.
+Product ids differ across models — the chassis answers on `0x0550` as well as `0x0551`,
+Darfon keyboards on `0xcabc` and `0xdabc` as well as `0xd2b1` — so pinning one made the
+tool work on exactly one laptop. Vendor ids do not differ, and the protocol declares its
+own generation in its report descriptor:
+
+| controller | vendor | signature | API |
+|---|---|---|---|
+| chassis | `0x187c` Alienware | output report `0x00`, 34 bytes | v4 |
+| keyboard | `0x0d62` Darfon | feature report `0xcc`, 64 bytes | v5 |
+
+Both halves are required. Vendor alone is too loose — Alienware and Dell ship several HID
+devices, and this laptop carries two unrelated Dell nodes. Of the ten HID devices present,
+only the two real controllers match. `verify_node` re-checks both immediately before the
+first write, because `/dev/hidraw0` here is sometimes a security key and the older
+tooling's hard-coded `hidraw0`/`hidraw1` would have aimed chassis packets at it.
+
+`alienfx-ctl devices` prints every node with its report shape, which is what explains why
+a node was or was not chosen on an unfamiliar machine. `ALIENFX_ELC_DEV` /
+`ALIENFX_KBD_DEV` pin a node by hand; an override still has to pass the same check.
 
 ## Other machines
 
-Nothing about the zone layout is hard-coded to one model. The machine identifies itself
-from DMI (`Alienware m16 R2`, sku, BIOS), and its keymap is stored per model as
-`~/.config/omarchy-alienfx-plugin/keymap/alienware-<model>-keymap.json` — so a config
+Nothing is hard-coded to one model. The machine identifies itself from DMI
+(`Alienware m16 R2`, sku, BIOS) and its keymap is stored per model as
+`~/.config/omarchy-alienfx-plugin/keymap/alienware-<model>-keymap.json`, so a config
 directory can move between machines without them fighting over one file. A plain
 `keymap.json` is still honoured for installs that predate this.
 
-A keymap may carry its own `zones` block, e.g.
+**Zones come from the keymap**, not from a constant:
 
 ```json
 "zones": { "tpd": [0], "logo": [2], "pbtn": [4] }
 ```
 
-which is what lets a model with fewer or differently-addressed zones work. **Create New
-KeyMap** offers to probe for them: it lights each candidate chassis id in turn and asks
-what came on. Where a machine's zone names are unfamiliar the gradient spreads them evenly
-across the axis instead of using the reference anchors.
+Any names work. A model with Tron strips or a second lid light is driven by shipping a
+keymap that lists them — no code change — and where the names are unfamiliar the gradient
+spreads them evenly along the blend axis rather than using the reference anchors. The order
+they are listed in is the order the gradient travels through them.
 
-Device nodes are always resolved by USB vendor/product id at runtime, so they follow the
-hardware rather than needing configuration.
+**Keyboards lit as four zones** — most older Alienware laptops, which have no per-key
+controller at all — are not a special case. Such a machine is simply one with more chassis
+zones and no keyboard:
+
+```json
+"keyboard": "zones",
+"zones": { "kb1": [2], "kb2": [3], "kb3": [4], "kb4": [5], "logo": [1], "pbtn": [0] }
+```
+
+It gets a theme gradient across the four keyboard zones from that data alone. An absent
+`keyboard` field means per-key.
+
+**Create New KeyMap** offers to probe the chassis zones, lighting each candidate id in turn
+and asking what came on, and it will save a zone-only keymap on a machine with no per-key
+controller.
+
+### Bundled keyboard shapes
+
+The wizard needs the shape of your keyboard before it can ask which LED belongs to which
+key, so three are bundled:
+
+| id | keys | tested |
+|---|---|---|
+| `m16-r2` | 85 | yes, probed on real hardware |
+| `compact` | 81 | no — `m16-r2` without the media column (14/15 inch) |
+| `numpad` | 102 | no — `m16-r2` plus a standard keypad block (16/17 inch) |
+
+These carry **no LED indices**, and that is deliberate rather than laziness. Indices are
+irregular on real hardware: on the reference machine row bases are near-multiples of 20
+(0, 20, 40, 61, 81, 100) but within rows they skip — `backspace` is 34 where the pattern
+says 33, the left arrow is 133 where a formula predicts 113, and the media keys sit alone
+at 156–159. That is PCB routing, not logic, and a formula fitting 34 of 85 keys is not a
+rule. Every tool in this space probes for them instead, and so does this one. A wrong shape
+is visible and skippable; a wrong index silently lights the wrong key.
 
 `alienfx-ctl keymap gaps` reports LED indices the keymap does not name and flags the ones
 adjacent to a named key — reach for it first if a single key ever behaves oddly.
@@ -249,7 +323,8 @@ adjacent to a named key — reach for it first if a single key ever behaves oddl
 ```
 manifest.json  Panel.qml  Model.js     the Quickshell plugin
 cli/src/alienfx_ctl/                   the CLI: device, apiv4, apiv5, gradient, palette, …
-cli/tests/                             135 tests, no hardware required
+cli/src/alienfx_ctl/data/              the reference keymap and the bundled shapes
+cli/tests/                             488 tests, no hardware required
 share/udev/                            the uaccess rule
 share/systemd/                         restore + resume units
 share/omarchy/hooks/theme-set.d/       the theme-switch hook
@@ -264,7 +339,7 @@ hard-won failures, including two that will brick the keyboard until reboot.
 ## Development
 
 ```bash
-cd cli && python3 -m pytest tests -q     # 135 tests, no hardware needed
+cd cli && python3 -m pytest tests -q     # 488 tests, no hardware needed
 ./cli/bin/alienfx-ctl devices            # run from the checkout, no install
 omarchy plugin validate .                # check the manifest
 ```

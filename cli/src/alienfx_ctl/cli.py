@@ -167,10 +167,6 @@ def cmd_set(args) -> int:
     if args.intensity is not None:
         st["intensity"] = max(-colors.INTENSITY_RANGE,
                               min(colors.INTENSITY_RANGE, int(args.intensity)))
-    if args.saturation is not None:
-        st["saturation"] = max(0.0, float(args.saturation))
-    if args.min_saturation is not None:
-        st["min_saturation"] = max(0.0, min(1.0, float(args.min_saturation)))
 
     if args.select is not None:
         if args.select not in device.zone_names():
@@ -222,7 +218,7 @@ def cmd_set(args) -> int:
     if (args.select is not None and args.color is None and args.effect is None
             and args.brightness is None and args.themesync is None
             and args.zonesync is None and args.axis is None
-            and args.speed is None and args.saturation is None):
+            and args.speed is None and args.intensity is None):
         state.save_state(st)
         return 0
 
@@ -646,10 +642,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--zones", "-z", default="selected", help="comma list, 'all', or 'selected'")
     p.add_argument("--brightness", "-b", help="0-255 or a percentage like 10%%")
     p.add_argument("--intensity", type=int,
-                   help="vibrancy trim -10..+10; 0 leaves colours untouched")
-    p.add_argument("--saturation", type=float, help="saturation multiplier (default 1.0, a no-op)")
-    p.add_argument("--min-saturation", dest="min_saturation", type=float,
-                   help="saturation floor 0-1: lifts washed-out theme colours, leaves vivid ones alone")
+                   help="vibrancy -10..+10 as an absolute saturation target: "
+                        "-10 muted, 0 the default, +10 fully saturated")
     p.add_argument("--effect", "-e", choices=engine.EFFECTS)
     p.add_argument("--axis", choices=gradient.AXES)
     p.add_argument("--speed", "-s", choices=sorted(apiv5.SPEED_PRESETS))

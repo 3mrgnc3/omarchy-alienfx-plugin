@@ -149,3 +149,31 @@ jobs:
           bash -n uninstall.sh
           bash -n share/bin/omarchy-alienfx-wizard
           bash -n share/omarchy/hooks/theme-set.d/50-omarchy-alienfx
+
+      - name: Check the CLI and the manifest agree on the version
+        run: |
+          python3 - <<'PY'
+          import json, re
+          manifest = json.load(open("manifest.json"))["version"]
+          source = open("cli/src/alienfx_ctl/__init__.py").read()
+          cli = re.search(r'__version__\s*=\s*"([^"]+)"', source).group(1)
+          # They are reported in different places - the plugin listing and
+          # `alienfx-ctl --version` - so a mismatch makes bug reports ambiguous.
+          assert manifest == cli, f"manifest {manifest} != CLI {cli}"
+          print(f"version OK: {cli}")
+          PY
+
+      - name: Check the README's test count is current
+        run: |
+          python3 - <<'PY'
+          import re, subprocess
+          out = subprocess.run(["python3", "-m", "pytest", "tests", "-q", "--collect-only"],
+                               cwd="cli", capture_output=True, text=True).stdout
+          actual = int(re.search(r"(\d+) tests? collected", out).group(1))
+          readme = open("README.md").read()
+          claimed = {int(n) for n in re.findall(r"(\d+) tests?, no hardware", readme)}
+          # A stale count is a small thing that quietly tells a reader the docs
+          # are not maintained.
+          assert claimed == {actual}, f"README claims {claimed}, actual {actual}"
+          print(f"README test count OK: {actual}")
+          PY

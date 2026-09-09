@@ -164,7 +164,11 @@ def load_state() -> dict:
 #: per-process module globals now (apiv5._last_mode, apiv4._last_programmed).
 #: Stripped on write rather than merely unwritten, so a file left behind by an
 #: older version cleans itself up instead of being read back forever.
-_NEVER_PERSIST = ("themesync", "kbd_mode", "pbtn_programmed")
+#: ``saturation``, ``value`` and ``min_saturation`` are retired: the intensity
+#: control replaced all three, and leaving them in a file invites someone to set
+#: one and wonder why nothing happens.
+_NEVER_PERSIST = ("themesync", "kbd_mode", "pbtn_programmed",
+                  "saturation", "value", "min_saturation")
 
 
 def save_state(new_state) -> None:

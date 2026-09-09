@@ -214,3 +214,32 @@ def test_intensity_persists_like_any_other_preference(config_root):
     st["intensity"] = -4
     state.save_state(st)
     assert state.load_state()["intensity"] == -4
+
+
+def test_the_retired_saturation_flags_are_gone_from_the_cli():
+    """They wrote to state that nothing reads any more, so setting one did
+    nothing and said nothing - the worst kind of leftover. The intensity
+    control replaced all three."""
+    import argparse
+    from alienfx_ctl import cli
+    parser = cli.build_parser() if hasattr(cli, "build_parser") else None
+    if parser is None:
+        import inspect
+        source = inspect.getsource(cli)
+        assert '"--saturation"' not in source
+        assert '"--min-saturation"' not in source
+        return
+    with pytest.raises(SystemExit):
+        parser.parse_args(["set", "--saturation", "2.4"])
+
+
+def test_a_state_file_carrying_the_retired_keys_cleans_itself(config_root):
+    """An existing install has them on disk. They must not survive a save, or
+    they linger as a puzzle for whoever reads the file next."""
+    st = state.load_state()
+    st.update(saturation=2.4, min_saturation=0.9, value=0.5, kbd_mode="paint")
+    state.save_state(st)
+    import json
+    on_disk = json.load(open(state.state_path()))
+    for key in ("saturation", "min_saturation", "value", "kbd_mode", "themesync"):
+        assert key not in on_disk, f"{key} was written back"
