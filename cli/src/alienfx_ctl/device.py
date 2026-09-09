@@ -21,15 +21,26 @@ import re
 ELC_VID, ELC_PID = 0x187C, 0x0551
 KBD_VID, KBD_PID = 0x0D62, 0xD2B1
 
-#: Protocol light ids for the chassis zones, confirmed by probing hardware.
-#: Ids 0x01, 0x03 and 0x05-0x09 exist in the address space but drive nothing.
+#: Protocol light ids for the chassis zones of the *reference* machine,
+#: confirmed by probing it. Ids 0x01, 0x03 and 0x05-0x09 exist in the address
+#: space but drive nothing there.
+#:
+#: This is a fallback, not the truth. Which chassis zones a machine has, and at
+#: which ids, is a property of the model - some have fewer, some have more (Tron
+#: strips, a second lid light), some address them differently - so it belongs in
+#: the keymap. ``keymap.zones()`` returns the real map and falls back to this.
 ELC_ZONES = {"tpd": [0x00], "logo": [0x02], "pbtn": [0x04]}
 
-#: Every zone this tool knows how to address.
+#: The reference machine's zones. Prefer ``zone_names()``, which asks the
+#: keymap; these exist so there is something sane to fall back to and so tests
+#: have a fixed set to work against.
 ZONES = ("kbd", "tpd", "logo", "pbtn")
-
-#: Chassis zones only accept a flat colour; animation is a keyboard feature.
 ELC_ZONE_NAMES = ("tpd", "logo", "pbtn")
+
+#: The keyboard is the one zone every supported machine has and the only one
+#: driven by its own controller. Everything else hangs off the chassis
+#: controller, whatever it happens to be called on a given model.
+KBD_ZONE = "kbd"
 
 _HID_ID_RE = re.compile(r"^HID_ID=([0-9a-fA-F]+):([0-9a-fA-F]+):([0-9a-fA-F]+)", re.M)
 _SYSFS_HIDRAW = "/sys/class/hidraw"
@@ -126,12 +137,39 @@ def _open_verified(vid: int, pid: int, label: str) -> int:
         raise DeviceError(f"{path}: {exc}") from exc
 
 
+def elc_zone_names() -> tuple:
+    """The chassis zones this machine actually has, from its keymap."""
+    from . import keymap
+    return tuple(keymap.zones())
+
+
+def zone_names() -> tuple:
+    """Every zone addressable on this machine: the keyboard plus its chassis.
+
+    Asks the keymap rather than assuming the reference machine's four. A model
+    with Tron strips or four keyboard zones can then be driven by shipping a
+    keymap, with no code change - and because ``gradient.elc_samples`` spreads
+    unfamiliar zone names evenly along the blend axis, such a machine gets a
+    working theme gradient for free.
+
+    Not cached. A keymap read is 0.17ms measured, which is nothing against the
+    63ms an actual chassis packet costs, and this project has twice been bitten
+    by caching state that then went stale.
+    """
+    return (KBD_ZONE,) + elc_zone_names()
+
+
 def needs_kbd(zones) -> bool:
-    return "kbd" in set(zones)
+    return KBD_ZONE in set(zones)
 
 
 def needs_elc(zones) -> bool:
-    return bool(set(zones) & set(ELC_ZONE_NAMES))
+    """Whether any requested zone lives on the chassis controller.
+
+    Anything that is not the keyboard does, by definition - so this stays
+    correct for zone names this build has never heard of.
+    """
+    return bool(set(zones) - {KBD_ZONE})
 
 
 # ---------------------------------------------------------------- descriptor cache
@@ -176,9 +214,11 @@ def open_fds(zones) -> dict:
     half-applied scheme behind.
     """
     wanted = set(zones)
-    unknown = wanted - set(ZONES)
+    unknown = wanted - set(zone_names())
     if unknown:
-        raise DeviceError(f"unknown zone(s): {', '.join(sorted(unknown))}")
+        raise DeviceError(
+            f"unknown zone(s): {', '.join(sorted(unknown))}; "
+            f"this machine has: {', '.join(zone_names())}")
 
     if _cache_enabled:
         # Open whatever is missing, then hand back only what was asked for. A

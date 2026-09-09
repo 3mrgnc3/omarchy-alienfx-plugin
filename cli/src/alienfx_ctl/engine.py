@@ -119,7 +119,8 @@ def plan(st, zones=None) -> dict:
     Split out from ``apply`` so it can be unit-tested and so ``--dry-run`` can
     show the exact colours that would be written.
     """
-    targets = [z for z in (zones or device.ZONES) if z in device.ZONES]
+    addressable = device.zone_names()
+    targets = [z for z in (zones or addressable) if z in addressable]
     if not targets:
         raise EngineError("no valid zones requested")
 
@@ -238,9 +239,16 @@ def apply(st, zones=None, persist: bool = False, fast: bool = False) -> dict:
             return
         # Group zones sharing a colour so identical colours cost one packet
         # instead of three - worth real time at 63ms each.
+        # Ids come from the keymap, not from the reference map: a model with a
+        # zone this build has never heard of must still be addressable, and
+        # indexing device.ELC_ZONES here would raise KeyError on it.
+        zone_ids = keymap.zones()
         grouped = {}
         for zone, rgb in work["elc"].items():
-            grouped.setdefault(tuple(rgb), []).extend(device.ELC_ZONES[zone])
+            ids = zone_ids.get(zone)
+            if not ids:
+                continue
+            grouped.setdefault(tuple(rgb), []).extend(ids)
         apiv4.begin(elc_fd)
         for rgb, ids in grouped.items():
             apiv4.set_one_color(elc_fd, rgb, ids)

@@ -24,15 +24,15 @@ def _fail(message: str, code: int = 2) -> int:
 def _parse_zones(value, st=None):
     """Resolve a --zones value into a list of zone names."""
     if not value or value == "all":
-        return list(device.ZONES)
+        return list(device.zone_names())
     if value == "selected":
         if st and not st.get("zonesync"):
             return [st.get("selected_zone", "kbd")]
-        return list(device.ZONES)
+        return list(device.zone_names())
     wanted = [part.strip() for part in str(value).split(",") if part.strip()]
-    unknown = [zone for zone in wanted if zone not in device.ZONES]
+    unknown = [zone for zone in wanted if zone not in device.zone_names()]
     if unknown:
-        raise ValueError(f"unknown zone(s): {', '.join(unknown)}; valid: {', '.join(device.ZONES)}")
+        raise ValueError(f"unknown zone(s): {', '.join(unknown)}; valid: {', '.join(device.zone_names())}")
     return wanted
 
 
@@ -109,7 +109,7 @@ def cmd_state(args) -> int:
         payload["devices"] = _devices_report()
         payload["theme"] = palette.theme_name()
         payload["effects"] = list(engine.EFFECTS)
-        payload["zone_names"] = list(device.ZONES)
+        payload["zone_names"] = list(device.zone_names())
         try:
             first, second = engine.resolve_anchors(st)
             payload["anchors"] = [colors.to_hex(first), colors.to_hex(second)]
@@ -130,7 +130,7 @@ def cmd_state(args) -> int:
           f"{'  (default)' if not st.get('intensity') else ''}")
     print(f"profile     : {state.current_profile() or '(none)'}")
     print(f"keymap      : {'user' if keymap.has_user_keymap() else 'shipped default'}")
-    for zone in device.ZONES:
+    for zone in device.zone_names():
         print(f"  {zone:5s} -> #{colors.to_hex(engine.zone_color(st, zone))}")
     return 0
 
@@ -173,7 +173,7 @@ def cmd_set(args) -> int:
         st["min_saturation"] = max(0.0, min(1.0, float(args.min_saturation)))
 
     if args.select is not None:
-        if args.select not in device.ZONES:
+        if args.select not in device.zone_names():
             return _fail(f"unknown zone {args.select!r}")
         st["selected_zone"] = args.select
 
@@ -185,7 +185,7 @@ def cmd_set(args) -> int:
     # to repaint every zone - not just whichever one the cursor happened to be
     # sitting on.
     if themesync_turned_on:
-        zones = list(device.ZONES)
+        zones = list(device.zone_names())
 
     if args.color is not None:
         rgb = colors.parse_color(args.color, palette=_safe_palette())
@@ -193,7 +193,7 @@ def cmd_set(args) -> int:
         # With zones synced there is one colour for the whole chassis, so write
         # it to every zone; that way unsyncing later keeps the current look
         # instead of snapping back to stale per-zone values.
-        targets = device.ZONES if st.get("zonesync") else zones
+        targets = device.zone_names() if st.get("zonesync") else zones
         for zone in targets:
             st["zones"].setdefault(zone, {})["color"] = hexed
         if len(zones) == 1:
@@ -251,7 +251,7 @@ def cmd_solid(args) -> int:
         hexed = colors.to_hex(colors.parse_color(args.color, palette=_safe_palette()))
         for zone in zones:
             st["zones"].setdefault(zone, {})["color"] = hexed
-        if len(zones) < len(device.ZONES):
+        if len(zones) < len(device.zone_names()):
             st["zonesync"] = False
     if args.brightness is not None:
         st["brightness"] = colors.parse_brightness(args.brightness)
@@ -283,7 +283,7 @@ def cmd_effect(args) -> int:
     zones = _parse_zones(args.zones, st)
     if args.color:
         hexed = colors.to_hex(colors.parse_color(args.color, palette=_safe_palette()))
-        for zone in (device.ZONES if st.get("zonesync") else zones):
+        for zone in (device.zone_names() if st.get("zonesync") else zones):
             st["zones"].setdefault(zone, {})["color"] = hexed
     if args.brightness is not None:
         st["brightness"] = colors.parse_brightness(args.brightness)
@@ -311,7 +311,7 @@ def cmd_theme(args) -> int:
         st["themesync"] = True
         st["effect"] = "gradient"
         try:
-            return _apply(st, list(device.ZONES), args)
+            return _apply(st, list(device.zone_names()), args)
         except palette.PaletteError as exc:
             return _fail(str(exc), 1)
     if args.theme_command == "show":
@@ -337,13 +337,13 @@ def cmd_themesync(args) -> int:
     st = state.load_state()
     if enabled:
         st["effect"] = "gradient"
-    return _apply(st, list(device.ZONES), args)
+    return _apply(st, list(device.zone_names()), args)
 
 
 def cmd_zonesync(args) -> int:
     st = state.load_state()
     st["zonesync"] = _bool_word(args.value)
-    return _apply(st, list(device.ZONES), args)
+    return _apply(st, list(device.zone_names()), args)
 
 
 def cmd_stream(args) -> int:
@@ -410,14 +410,14 @@ def cmd_commit(args) -> int:
     user has settled, so that colour still survives a power transition.
     """
     st = state.load_state()
-    return _apply(st, list(device.ZONES), args)
+    return _apply(st, list(device.zone_names()), args)
 
 
 def cmd_restore(args) -> int:
     """Re-apply live state. Used by the systemd unit at login and after resume."""
     st = state.load_state()
     try:
-        return _apply(st, list(device.ZONES), args, save=False)
+        return _apply(st, list(device.zone_names()), args, save=False)
     except device.DeviceError as exc:
         # A restore that runs before the hidraw ACL lands must not fail the
         # unit; the user can re-apply, and next login will work.
@@ -453,7 +453,7 @@ def cmd_profile(args) -> int:
         state.save_state(loaded)
         state.set_current_profile(args.name)
         print(f"loaded profile {args.name!r}")
-        return _apply(loaded, list(device.ZONES), args, save=False)
+        return _apply(loaded, list(device.zone_names()), args, save=False)
 
     if args.profile_command == "rename":
         path = state.rename_profile(args.name, args.new_name)

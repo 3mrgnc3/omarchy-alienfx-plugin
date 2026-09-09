@@ -184,3 +184,89 @@ def test_cache_disabled_by_default_and_restored_after_close():
     assert device.cache_enabled() is True
     device.close_cache()
     assert device.cache_enabled() is False
+
+
+# ------------------------------------------------- zones come from the keymap
+#
+# Which chassis zones a machine has, and at which protocol ids, is a property of
+# the model. It used to be a hard-coded four-tuple, which meant a model with
+# Tron strips or four keyboard zones could not be addressed even with a correct
+# keymap - open_fds rejected the names outright.
+
+FICTIONAL = {
+    "tpd": [0x00], "logo": [0x02], "pbtn": [0x04],
+    "tron_left": [0x06], "tron_right": [0x07],
+}
+
+
+@pytest.fixture()
+def other_model(monkeypatch):
+    """A machine whose chassis zones this build has never heard of."""
+    from alienfx_ctl import keymap
+    monkeypatch.setattr(keymap, "zones", lambda data=None: dict(FICTIONAL))
+    return FICTIONAL
+
+
+def test_addressable_zones_follow_the_keymap(other_model):
+    names = device.zone_names()
+    assert names[0] == device.KBD_ZONE, "the keyboard is always first"
+    assert set(names) == {"kbd"} | set(other_model)
+
+
+def test_an_unfamiliar_zone_still_routes_to_the_chassis_controller(other_model):
+    """needs_elc asks "is it not the keyboard?" rather than checking a list, so
+    it stays right for zone names added later."""
+    assert device.needs_elc(["tron_left"]) is True
+    assert device.needs_elc(["kbd"]) is False
+    assert device.needs_kbd(["tron_left"]) is False
+
+
+def test_a_zone_this_machine_lacks_is_rejected_with_a_useful_message(other_model):
+    with pytest.raises(device.DeviceError) as caught:
+        device.open_fds(["nosuchzone"])
+    message = str(caught.value)
+    assert "nosuchzone" in message
+    assert "tron_left" in message, "says what this machine actually has"
+
+
+def test_the_reference_map_is_only_a_fallback():
+    """With no keymap-declared zones, the reference machine's map stands in."""
+    from alienfx_ctl import keymap
+    assert keymap.zones({}) == dict(device.ELC_ZONES)
+
+
+def test_a_six_zone_model_gets_a_theme_gradient_with_no_code_change(other_model):
+    """The point of making zones dynamic. gradient.elc_samples spreads
+    unfamiliar zone names evenly along the blend axis, so a model that ships a
+    keymap listing five chassis zones is driven correctly by data alone."""
+    from alienfx_ctl import engine, state
+    st = dict(state.DEFAULT_STATE)
+    st.update(brightness=255, intensity=0, effect="gradient")
+    plan = engine.plan(st, list(device.zone_names()))
+    assert set(plan["elc"]) == set(other_model), "every chassis zone got a colour"
+    assert len(set(plan["elc"].values())) > 1, "and they are not all the same"
+
+
+def test_the_chassis_writer_uses_keymap_ids_not_the_reference_map(other_model, monkeypatch):
+    """It indexed device.ELC_ZONES directly, which raises KeyError on a zone
+    name the reference machine does not have - so a model with Tron strips would
+    have crashed on apply rather than lighting them."""
+    from alienfx_ctl import apiv4, device as dev, engine, state
+    written = []
+    # Silence the wire entirely - the power-button NVRAM walk also writes, and
+    # this test is only about which ids the colour path selects.
+    monkeypatch.setattr(apiv4, "elc_send", lambda fd, payload: None)
+    monkeypatch.setattr(apiv4, "begin", lambda fd, cid=0: None)
+    monkeypatch.setattr(apiv4, "commit", lambda fd, cid=0: None)
+    monkeypatch.setattr(apiv4, "persist", lambda fd, items: None)
+    monkeypatch.setattr(apiv4, "set_one_color",
+                        lambda fd, rgb, ids: written.append((tuple(rgb), sorted(ids))))
+    monkeypatch.setattr(dev, "open_fds", lambda zones: {"elc": 99})
+    monkeypatch.setattr(dev, "close_fds", lambda fds: None)
+
+    st = dict(state.DEFAULT_STATE)
+    st.update(brightness=255, effect="gradient")
+    engine.apply(st, [z for z in device.zone_names() if z != "kbd"])
+
+    ids = sorted(i for _, group in written for i in group)
+    assert 0x06 in ids and 0x07 in ids, f"Tron ids never reached the wire: {ids}"
