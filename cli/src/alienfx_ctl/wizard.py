@@ -423,6 +423,11 @@ def create_new() -> int:
     return _save(model_name, grid, assigned, zones)
 
 
+def _kbd_vid_pid() -> str:
+    ids = device.node_ids(device.KBD)
+    return f"{ids[0]:04x}:{ids[1]:04x}" if ids else ""
+
+
 def _save(model_name, grid, assigned, zones) -> int:
     """Write the keymap file for a finished mapping."""
     # Only keys that actually got an LED are recorded. A partial mapping is
@@ -432,7 +437,9 @@ def _save(model_name, grid, assigned, zones) -> int:
     data = {
         "device": model_name,
         "model_slug": hardware.slug(model_name),
-        "vid_pid": f"{device.KBD_VID:04x}:{device.KBD_PID:04x}",
+        # The id actually found. Product ids differ across models, so writing
+        # a constant here would mislabel every keymap made on other hardware.
+        "vid_pid": _kbd_vid_pid(),
         "key_to_index": dict(assigned),
         "index_to_key": {str(index): name for name, index in assigned.items()},
         "grid_positions": {name: positions[name] for name in assigned if name in positions},

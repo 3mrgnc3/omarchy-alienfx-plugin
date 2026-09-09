@@ -42,31 +42,47 @@ def test_node_sort_is_numeric_not_lexicographic():
 
 def test_find_node_honours_an_override(monkeypatch):
     monkeypatch.setenv("ALIENFX_KBD_DEV", "/dev/hidrawX")
-    assert device.find_node(device.KBD_VID, device.KBD_PID) == "/dev/hidrawX"
+    assert device.find_node(device.KBD) == "/dev/hidrawX"
 
 
-def test_find_node_returns_none_for_an_unknown_device(monkeypatch):
+def test_find_node_returns_none_when_nothing_matches(monkeypatch):
     monkeypatch.setattr(device, "iter_nodes", lambda: iter([("hidraw0", 0x1234, 0x5678)]))
-    assert device.find_node(0xDEAD, 0xBEEF) is None
+    monkeypatch.setattr(device, "node_matches", lambda node, controller: False)
+    assert device.find_node(device.KBD) is None
 
 
-def test_verify_node_refuses_a_mismatched_device(monkeypatch):
-    """The guard that stops lighting packets reaching an unrelated device."""
+def test_verify_node_refuses_a_different_vendor(monkeypatch):
+    """The guard that stops lighting packets reaching an unrelated device. On
+    this laptop hidraw0 was once a security key."""
     monkeypatch.setattr(device, "_read_ids", lambda node: (0x1050, 0x0407))
     with pytest.raises(device.DeviceError) as excinfo:
-        device.verify_node("/dev/hidraw0", device.ELC_VID, device.ELC_PID)
+        device.verify_node("/dev/hidraw0", device.ELC)
     assert "refusing to write" in str(excinfo.value)
 
 
-def test_verify_node_accepts_a_match(monkeypatch):
-    monkeypatch.setattr(device, "_read_ids", lambda node: (device.ELC_VID, device.ELC_PID))
-    device.verify_node("/dev/hidraw1", device.ELC_VID, device.ELC_PID)
+def test_verify_node_refuses_the_right_vendor_with_the_wrong_report(monkeypatch):
+    """Vendor alone is not enough - Alienware ships more than one HID device,
+    and this machine has two unrelated Dell nodes. The report signature is what
+    makes the match specific."""
+    monkeypatch.setattr(device, "_read_ids", lambda node: (device.ELC_VID, 0x9999))
+    monkeypatch.setattr(device, "report_map", lambda node: {(0, "out"): 7})
+    with pytest.raises(device.DeviceError) as excinfo:
+        device.verify_node("/dev/hidraw0", device.ELC)
+    assert "refusing to write" in str(excinfo.value)
+
+
+def test_verify_node_accepts_the_right_vendor_and_report(monkeypatch):
+    """Note the product id is deliberately *not* the reference machine's: that
+    is the whole point of matching on report shape."""
+    monkeypatch.setattr(device, "_read_ids", lambda node: (device.ELC_VID, 0x0550))
+    monkeypatch.setattr(device, "report_map", lambda node: {(0, "out"): 33})
+    device.verify_node("/dev/hidraw1", device.ELC)
 
 
 def test_verify_node_refuses_when_identity_is_unknown(monkeypatch):
     monkeypatch.setattr(device, "_read_ids", lambda node: None)
     with pytest.raises(device.DeviceError):
-        device.verify_node("/dev/hidraw9", device.ELC_VID, device.ELC_PID)
+        device.verify_node("/dev/hidraw9", device.ELC)
 
 
 def test_open_fds_is_atomic_and_leaks_nothing(monkeypatch):
@@ -74,8 +90,8 @@ def test_open_fds_is_atomic_and_leaks_nothing(monkeypatch):
     otherwise a retry loop leaks descriptors and a scheme half-applies."""
     opened, closed = [], []
 
-    def fake_open(vid, pid, label):
-        if (vid, pid) == (device.KBD_VID, device.KBD_PID):
+    def fake_open(controller):
+        if controller is device.KBD:
             fd = 101
             opened.append(fd)
             return fd
@@ -94,8 +110,8 @@ def test_open_fds_is_atomic_and_leaks_nothing(monkeypatch):
 def test_open_fds_only_opens_what_is_needed(monkeypatch):
     calls = []
 
-    def fake_open(vid, pid, label):
-        calls.append(label)
+    def fake_open(controller):
+        calls.append(controller.key)
         return len(calls)
 
     monkeypatch.setattr(device, "_open_verified", fake_open)
@@ -129,8 +145,8 @@ def test_cache_reuses_one_descriptor_across_calls(monkeypatch):
     chassis node each time costs ~52ms, which is most of a frame."""
     opens = []
 
-    def fake_open(vid, pid, label):
-        opens.append(label)
+    def fake_open(controller):
+        opens.append(controller.key)
         return 200 + len(opens)
 
     monkeypatch.setattr(device, "_open_verified", fake_open)
@@ -149,7 +165,7 @@ def test_cache_reuses_one_descriptor_across_calls(monkeypatch):
 def test_close_fds_is_a_noop_while_cached(monkeypatch):
     """Closing a cached descriptor would break every later call."""
     closed = []
-    monkeypatch.setattr(device, "_open_verified", lambda v, p, l: 300)
+    monkeypatch.setattr(device, "_open_verified", lambda controller: 300)
     monkeypatch.setattr(os, "close", lambda fd: closed.append(fd))
     device.enable_cache()
     try:
@@ -165,7 +181,8 @@ def test_close_fds_is_a_noop_while_cached(monkeypatch):
 def test_cache_opens_only_the_controllers_asked_for(monkeypatch):
     labels = []
     monkeypatch.setattr(device, "_open_verified",
-                        lambda v, p, l: (labels.append(l), 400 + len(labels))[1])
+                        lambda controller: (labels.append(controller.key),
+                                            400 + len(labels))[1])
     monkeypatch.setattr(os, "close", lambda fd: None)
     device.enable_cache()
     try:
@@ -270,3 +287,110 @@ def test_the_chassis_writer_uses_keymap_ids_not_the_reference_map(other_model, m
 
     ids = sorted(i for _, group in written for i in group)
     assert 0x06 in ids and 0x07 in ids, f"Tron ids never reached the wire: {ids}"
+
+
+# --------------------------------------- recognition by report shape, not PID
+#
+# Detection used to pin one product id per controller, so this tool worked on
+# exactly one laptop: any other Alienware failed with "not found". Product ids
+# differ across models (the chassis answers on 0x0550 as well as 0x0551, Darfon
+# keyboards on 0xcabc and 0xdabc as well as 0xd2b1) while the vendor ids do not,
+# and the protocol identifies its own generation by report shape. So that is
+# what is matched.
+
+
+def _descriptor(items):
+    """Build a minimal HID report descriptor from (tag_byte, value) pairs."""
+    out = bytearray()
+    for prefix, value, width in items:
+        out.append(prefix)
+        out += int(value).to_bytes(width, "little") if width else b""
+    return bytes(out)
+
+
+# Report Size (0x75), Report Count (0x95), Report ID (0x85), Output (0x91),
+# Feature (0xB1) - one byte of data each.
+def _simple_descriptor(report_id, main_tag, size_bits, count):
+    return _descriptor([
+        (0x85, report_id, 1),
+        (0x75, size_bits, 1),
+        (0x95, count, 1),
+        (main_tag, 0x02, 1),
+    ])
+
+
+def test_the_descriptor_parser_reads_report_sizes():
+    """33 payload bytes on report 0 is the chassis signature; 63 on 0xcc is the
+    keyboard's. Both measured off the real hardware."""
+    import builtins
+    from unittest import mock
+    desc = _simple_descriptor(0x00, 0x91, 8, 33)
+    with mock.patch.object(builtins, "open", mock.mock_open(read_data=desc)):
+        assert device.report_map("hidrawX") == {(0x00, "out"): 33}
+
+
+def test_the_descriptor_parser_survives_rubbish():
+    """An unreadable or nonsense descriptor must mean "does not match", never
+    an exception - this runs over every HID device on the machine, including
+    other people's."""
+    import builtins
+    from unittest import mock
+    for junk in (b"", b"\xff", b"\xfe\x02", b"\x85"):
+        with mock.patch.object(builtins, "open", mock.mock_open(read_data=junk)):
+            assert isinstance(device.report_map("hidrawX"), dict)
+
+
+def test_a_chassis_with_a_different_product_id_is_still_recognised(monkeypatch):
+    """The portability property, and the reason for the whole change."""
+    monkeypatch.setattr(device, "_read_ids", lambda node: (device.ELC_VID, 0x0550))
+    monkeypatch.setattr(device, "report_map", lambda node: {(0x00, "out"): 33})
+    assert device.node_matches("hidraw3", device.ELC) is True
+
+
+def test_a_keyboard_with_a_different_product_id_is_still_recognised(monkeypatch):
+    """0xcabc and 0xdabc are the x15/x17 Darfon keyboards."""
+    monkeypatch.setattr(device, "_read_ids", lambda node: (device.KBD_VID, 0xCABC))
+    monkeypatch.setattr(device, "report_map", lambda node: {(0xCC, "feat"): 63})
+    assert device.node_matches("hidraw3", device.KBD) is True
+
+
+def test_the_same_vendor_with_the_wrong_report_is_not_a_match(monkeypatch):
+    """Vendor alone would be too loose. Alienware ships more than one HID
+    device and this machine carries two unrelated Dell nodes."""
+    monkeypatch.setattr(device, "_read_ids", lambda node: (device.ELC_VID, 0x1234))
+    monkeypatch.setattr(device, "report_map", lambda node: {(0x00, "out"): 8})
+    assert device.node_matches("hidraw3", device.ELC) is False
+
+
+def test_the_right_report_from_the_wrong_vendor_is_not_a_match(monkeypatch):
+    """And shape alone would be too loose in the other direction."""
+    monkeypatch.setattr(device, "_read_ids", lambda node: (0x046D, 0xB034))
+    monkeypatch.setattr(device, "report_map", lambda node: {(0x00, "out"): 33})
+    assert device.node_matches("hidraw3", device.ELC) is False
+
+
+def test_the_two_controllers_cannot_match_the_same_device(monkeypatch):
+    """Their vendors differ, so nothing can be both - which is what lets
+    find_node take the first match without tie-breaking."""
+    assert device.ELC.vid != device.KBD.vid
+
+
+def test_nothing_resolves_a_device_by_product_id():
+    """A guard against the old habit creeping back. The reference product ids
+    are kept for documentation and tests; if a lookup ever uses one again, this
+    is the reminder that models differ."""
+    import inspect
+    source = inspect.getsource(device)
+    body = source[source.index("def find_node"):]
+    assert "REFERENCE_ELC_PID" not in body
+    assert "REFERENCE_KBD_PID" not in body
+
+
+def test_a_missing_controller_explains_what_it_looked_for(monkeypatch):
+    """The error a user on an unsupported machine actually sees, so it should
+    say what would have satisfied it."""
+    monkeypatch.setattr(device, "find_node", lambda controller: None)
+    with pytest.raises(device.DeviceError) as caught:
+        device._open_verified(device.KBD)
+    message = str(caught.value)
+    assert "0d62" in message and "report signature" in message

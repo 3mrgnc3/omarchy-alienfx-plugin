@@ -477,13 +477,10 @@ def cmd_profile(args) -> int:
 def _devices_report():
     """Per-controller discovery and writability, for diagnostics and the UI."""
     report = {}
-    for key, label, vid, pid in (
-        ("elc", "AW-ELC chassis", device.ELC_VID, device.ELC_PID),
-        ("kbd", "keyboard", device.KBD_VID, device.KBD_PID),
-    ):
-        path = device.find_node(vid, pid)
-        report[key] = {
-            "label": label,
+    for controller in device.CONTROLLERS:
+        path = device.find_node(controller)
+        report[controller.key] = {
+            "label": controller.label,
             "path": path,
             "found": path is not None,
             "writable": bool(path) and os.access(path, os.R_OK | os.W_OK),
@@ -497,25 +494,32 @@ def _devices_ready() -> bool:
 
 def cmd_devices(args) -> int:
     """Diagnostics: what we found, and whether we can write to it."""
-    print(f"{'node':10s} {'vid:pid':12s} role")
-    roles = {
-        (device.ELC_VID, device.ELC_PID): "AW-ELC chassis (tpd/logo/pbtn)",
-        (device.KBD_VID, device.KBD_PID): "keyboard (per-key)",
-    }
+    print(f"{'node':10s} {'vid:pid':12s} reports                    role")
     for node, vid, pid in device.iter_nodes():
-        role = roles.get((vid, pid), "")
-        print(f"/dev/{node:5s} {vid:04x}:{pid:04x}    {role}")
+        # Recognition is by report shape, so show it: this is the line that
+        # explains *why* a node was or was not chosen on an unfamiliar machine.
+        matched = next((c for c in device.CONTROLLERS
+                        if device.node_matches(node, c)), None)
+        reports = device.report_map(node)
+        shape = ",".join(
+            f"{kind}{rid:02x}:{size + 1}"
+            for (rid, kind), size in sorted(reports.items())
+        )[:26]
+        role = f"{matched.label}" if matched else ""
+        print(f"/dev/{node:5s} {vid:04x}:{pid:04x}    {shape:26s} {role}")
     print()
-    for label, vid, pid in (
-        ("chassis ", device.ELC_VID, device.ELC_PID),
-        ("keyboard", device.KBD_VID, device.KBD_PID),
-    ):
-        path = device.find_node(vid, pid)
+    for controller in device.CONTROLLERS:
+        path = device.find_node(controller)
         if not path:
-            print(f"{label}: NOT FOUND")
+            print(f"{controller.key:8s}: NOT FOUND - no vendor {controller.vid:04x} device "
+                  f"declaring a {controller.payload_bytes + 1}-byte "
+                  f"{controller.report_kind} report 0x{controller.report_id:02x}")
             continue
         writable = os.access(path, os.R_OK | os.W_OK)
-        print(f"{label}: {path} {'writable' if writable else 'NOT writable (udev rule missing?)'}")
+        ids = device.node_ids(controller)
+        seen = f"{ids[0]:04x}:{ids[1]:04x}" if ids else "?"
+        print(f"{controller.key:8s}: {path} ({seen}) "
+              f"{'writable' if writable else 'NOT writable (udev rule missing?)'}")
     return 0
 
 
