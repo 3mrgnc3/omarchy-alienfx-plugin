@@ -329,12 +329,17 @@ share/udev/                            the uaccess rule
 share/systemd/                         restore + resume units
 share/omarchy/hooks/theme-set.d/       the theme-switch hook
 share/bin/                             the wizard's terminal launcher
-archive/                               previous generations, kept for reference
 docs/dead-ends.md                      things that do not work, and why
 ```
 
 `docs/dead-ends.md` is worth reading before changing the hardware layer. It records
 hard-won failures, including two that will brick the keyboard until reboot.
+
+Earlier generations of this tool are kept on the `archive-reference` branch rather than on
+`main`: they were 15M of the repo, every user installing the plugin would have cloned
+them, and they contain runnable scripts that hit the hardware directly — including the two
+failure modes above. Fetch them with
+`git checkout archive-reference -- archive/` when you need to look something up.
 
 ## Development
 
