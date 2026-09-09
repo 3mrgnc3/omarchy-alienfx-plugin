@@ -306,3 +306,81 @@ def test_the_saved_grid_keeps_the_real_columns_from_the_template(config_root, sh
     written = json.load(open(keymap.model_keymap_path("Alienware m16 R2")))
     assert written["grid_positions"] == shipped_keymap["grid_positions"]
     assert gradient.extreme_indices(written) == gradient.extreme_indices(shipped_keymap)
+
+
+# --------------------------------------------------- the bundled layouts
+#
+# Bundled layouts carry keyboard *shapes* and deliberately no LED indices.
+# Indices are irregular on real hardware and cannot be derived - see
+# docs/dead-ends.md - so the wizard probes them. The shape is bundled because
+# without it there is no way to map a keyboard the reference does not have, such
+# as one with a numeric keypad.
+
+def test_every_bundled_layout_loads_and_is_navigable():
+    for name in layout.bundled():
+        grid = layout.load_bundled(name)
+        assert grid.keys(), f"{name} is empty"
+        cursor = (0, 0)
+        for direction in (term.DOWN, term.RIGHT, term.UP, term.LEFT):
+            cursor = grid.move(cursor, direction)
+        assert grid.name_at(cursor)
+
+
+def test_no_bundled_layout_claims_to_know_an_led_index():
+    """The one thing that must never be shipped as a guess. A wrong shape is
+    visible and skippable; a wrong index silently lights the wrong key, and the
+    user cannot tell our bad data from their own hardware."""
+    import json
+    with open(layout.BUNDLED_LAYOUTS, encoding="utf-8") as handle:
+        raw = json.load(handle)
+    for name, spec in raw["layouts"].items():
+        for row in spec["rows"]:
+            for entry in row:
+                assert len(entry) == 2, f"{name}: unexpected extra field {entry}"
+                assert isinstance(entry[0], str) and isinstance(entry[1], int)
+        assert "key_to_index" not in spec and "index" not in spec
+
+
+def test_the_reference_layout_still_matches_the_shipped_keymap(shipped_keymap):
+    """It is generated from that keymap, so this catches the two drifting
+    apart - which would mean two descriptions of one keyboard."""
+    assert (layout.load_bundled("m16-r2").grid_positions()
+            == layout.Layout.from_keymap(shipped_keymap).grid_positions())
+
+
+def test_every_layout_is_honest_about_whether_it_was_tested():
+    """Only the machine we actually own is marked verified. The others are
+    inferred, and the wizard says so when it offers them."""
+    verified = {name for name, spec in layout.bundled().items() if spec.get("verified")}
+    assert verified == {"m16-r2"}
+    for name, spec in layout.bundled().items():
+        assert spec.get("source"), f"{name} does not say where it came from"
+
+
+def test_the_numpad_layout_actually_contains_a_numpad():
+    """The reason bundling shapes is necessary rather than merely convenient:
+    a numpad user cannot map keys the template does not contain."""
+    keys = set(layout.load_bundled("numpad").keys())
+    assert {"kp0", "kp5", "kpenter", "numlock"} <= keys
+    assert len(keys) > len(set(layout.load_bundled("m16-r2").keys()))
+
+
+def test_the_compact_layout_drops_only_the_media_column():
+    reference = set(layout.load_bundled("m16-r2").keys())
+    compact = set(layout.load_bundled("compact").keys())
+    assert compact < reference
+    assert reference - compact == {"micmute", "mute", "volumeup", "volumedown"}
+
+
+def test_every_key_in_every_layout_has_a_readable_label():
+    """The user is reading these off their own keyboard, so a raw internal name
+    like 'kpasterisk' shouted back at them is a usability bug."""
+    for name in layout.bundled():
+        for key in layout.load_bundled(name).keys():
+            assert layout.label_for(key), key
+            # Either it has a written label, or its own name is already short
+            # and self-evident ("q", "f12", "1"). What must never happen is a
+            # long internal identifier shown raw - "kpasterisk" means nothing
+            # to someone looking at their keyboard.
+            assert key in layout.LABELS or (key.isalnum() and len(key) <= 3), (
+                f"{key!r} would be shown to the user as-is")

@@ -17,7 +17,26 @@ layout in the project and not two that can drift apart.
 
 from __future__ import annotations
 
+import json
+import os
+
 from . import gradient
+
+#: Bundled keyboard *shapes* - which keys exist and where they sit.
+#:
+#: Deliberately no LED indices. Those are irregular on real hardware and cannot
+#: be derived: on the reference machine the row bases are near-multiples of 20
+#: (0, 20, 40, 61, 81, 100) but within rows the indices skip - backspace is 34
+#: where the pattern says 33, every row-2 key is one higher, the left arrow is
+#: 133 where a formula predicts 113, and the media keys sit alone at 156-159.
+#: That is PCB routing, not logic, which is why every tool in this space probes
+#: for it rather than shipping tables of it.
+#:
+#: A layout is still worth bundling, and not merely as a convenience: the wizard
+#: asks the user to point at keys from a template, so on a keyboard shaped
+#: differently from the reference - one with a numeric keypad, say - there would
+#: otherwise be no way to map those keys at all.
+BUNDLED_LAYOUTS = os.path.join(os.path.dirname(__file__), "data", "layouts.json")
 
 
 class LayoutError(ValueError):
@@ -164,11 +183,29 @@ LABELS = {
     "fn": "FN", "up": "UP ARROW", "down": "DOWN ARROW",
     "left": "LEFT ARROW", "right": "RIGHT ARROW",
     "micmute": "MIC MUTE  (right edge)", "mute": "SPEAKER MUTE  (right edge)",
-    "volup": "VOLUME UP  (right edge)", "voldown": "VOLUME DOWN  (right edge)",
+    "volumeup": "VOLUME UP  (right edge)", "volumedown": "VOLUME DOWN  (right edge)",
     "home": "HOME", "end": "END",
+    "numlock": "NUM LOCK", "kpslash": "KEYPAD  /", "kpasterisk": "KEYPAD  *",
+    "kpminus": "KEYPAD  -", "kpplus": "KEYPAD  +", "kpenter": "KEYPAD ENTER",
+    "kpdot": "KEYPAD  .",
+    **{f"kp{digit}": f"KEYPAD  {digit}" for digit in range(10)},
 }
 
 
 def label_for(name: str) -> str:
     """How a key should be described to someone looking at their keyboard."""
     return LABELS.get(name, name.upper())
+
+
+def bundled() -> dict:
+    """``{id: spec}`` for every bundled layout."""
+    with open(BUNDLED_LAYOUTS, encoding="utf-8") as handle:
+        return json.load(handle).get("layouts") or {}
+
+
+def load_bundled(name: str) -> "Layout":
+    """Build a layout from the bundled set."""
+    spec = bundled().get(name)
+    if spec is None:
+        raise LayoutError(f"no bundled layout named {name!r}")
+    return Layout([[(key, int(col)) for key, col in row] for row in spec["rows"]])

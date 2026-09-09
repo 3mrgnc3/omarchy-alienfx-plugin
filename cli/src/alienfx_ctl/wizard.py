@@ -323,14 +323,18 @@ def _choose_grid(echo) -> "layout.Layout":
     echo("The wizard needs the shape of your keyboard before it can ask which")
     echo("LED belongs to which key.")
     echo("")
-    echo("  1. Use the built-in layout (recommended)")
-    echo("  2. Start from another keymap file")
+    options = sorted(layout.bundled().items())
+    for number, (name, spec) in enumerate(options, start=1):
+        mark = "" if spec.get("verified") else "   (untested - adjust as needed)"
+        echo(f"  {number}. {spec.get('label', name)}{mark}")
+    other = len(options) + 1
+    echo(f"  {other}. Start from another keymap file")
 
     while True:
-        choice = _ask("\n  Choose [1-2]: ", "1")
-        if choice in ("1", ""):
-            return layout.Layout.from_keymap(keymap.load_file(keymap.SHIPPED_KEYMAP))
-        if choice == "2":
+        choice = _ask(f"\n  Choose [1-{other}]: ", "1")
+        if choice.isdigit() and 1 <= int(choice) <= len(options):
+            return layout.load_bundled(options[int(choice) - 1][0])
+        if choice == str(other):
             path = _ask("  Path to a keymap file: ")
             if not path:
                 continue
@@ -339,7 +343,7 @@ def _choose_grid(echo) -> "layout.Layout":
             except (keymap.KeymapError, layout.LayoutError, OSError) as exc:
                 echo(f"  cannot use that file: {exc}")
                 continue
-        echo("  please choose 1 or 2")
+        echo(f"  please choose 1 to {other}")
 
 
 def create_new() -> int:
