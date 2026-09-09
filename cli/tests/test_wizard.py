@@ -558,3 +558,69 @@ def test_the_shipped_keymap_survives_a_full_round_trip(config_root, shipped_keym
     original = {k: v for k, v in shipped_keymap["secondary_functions"].items()
                 if v and v.strip() != "."}
     assert written["secondary_functions"] == original
+
+
+# ------------------------------------------------------------- navigation
+#
+# An 85-key run is long enough that spotting a mistake near the end should not
+# mean arrowing back through four rows, and that losing track of what is left
+# is easy.
+
+def test_a_digit_jumps_to_the_start_of_that_row(shipped_keymap):
+    grid = layout.Layout.from_keymap(shipped_keymap)
+    assigned, _, _ = _run(grid, ["3", term.ENTER, "q"])
+    first_of_row_three = grid.rows[2][0][0]
+    assert list(assigned) == [first_of_row_three]
+
+
+def test_jumping_to_row_one_returns_to_the_beginning(shipped_keymap):
+    grid = layout.Layout.from_keymap(shipped_keymap)
+    assigned, _, _ = _run(grid, [term.DOWN, term.DOWN, "1", term.ENTER, "q"])
+    assert list(assigned) == [grid.rows[0][0][0]]
+
+
+def test_a_row_that_does_not_exist_is_refused_not_ignored(grid):
+    lines = []
+    wizard.assign_leds(grid, lambda changes: None,
+                       term.from_sequence(["9", "q"]), lines.append)
+    assert any("no row 9" in line for line in lines)
+
+
+def test_jumping_offers_a_fresh_guess_for_the_new_key(shipped_keymap):
+    """Not the candidate left over from wherever the cursor was."""
+    grid = layout.Layout.from_keymap(shipped_keymap)
+    assigned, probed, _ = _run(grid, [term.ENTER, "4", term.ENTER, "q"])
+    values = sorted(assigned.values())
+    assert values == [0, 1], f"the second key guessed the next index: {assigned}"
+
+
+def test_review_reports_progress_for_every_row(shipped_keymap):
+    grid = layout.Layout.from_keymap(shipped_keymap)
+    lines = []
+    wizard.assign_leds(grid, lambda changes: None,
+                       term.from_sequence([term.ENTER, "r", "q"]), lines.append)
+    review = [line for line in lines if line.strip().startswith("row ")]
+    assert len(review) == len(grid.rows)
+    assert "1/16" in review[0], review[0]
+
+
+def test_review_names_what_is_still_missing(grid):
+    lines = []
+    wizard.assign_leds(grid, lambda changes: None,
+                       term.from_sequence([term.ENTER, "r", "q"]), lines.append)
+    text = "\n".join(lines)
+    assert "still to do" in text
+
+
+def test_review_does_not_move_the_light_or_assign_anything(grid):
+    assigned, probed, _ = _run(grid, ["r", "r", term.ENTER, "q"])
+    assert assigned == {"esc": 0}
+    assert probed.count(0) == 1, "review is free"
+
+
+def test_a_fully_mapped_row_reads_as_done(grid):
+    lines = []
+    keys = [term.ENTER] * len(grid.rows[0]) + ["1", "r", "q"]
+    wizard.assign_leds(grid, lambda changes: None,
+                       term.from_sequence(keys), lines.append)
+    assert any("done" in line for line in lines if line.strip().startswith("row 1"))

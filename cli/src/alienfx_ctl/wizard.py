@@ -190,6 +190,8 @@ _CONTROLS = (
     ("enter", "that's it - save this key (turns green)"),
     ("s", "skip: this machine has no such key"),
     ("u", "unassign the key shown"),
+    ("1-9", "jump to the start of that row"),
+    ("r", "review what is mapped so far"),
     ("q", "finish and save"),
 )
 
@@ -299,6 +301,25 @@ def assign_leds(grid, paint, read_key, echo, max_index=_MAX_INDEX,
                 if on_save:
                     on_save(dict(assigned))
                 lit = None
+        elif pressed == "r":
+            # On an eighty-five key run it is easy to lose track of what is
+            # left, and arrowing through to find out costs the light's place.
+            for index, row in enumerate(grid.rows):
+                names = [key for key, _ in row]
+                done = [key for key in names if key in assigned]
+                missing = [key for key in names if key not in assigned]
+                echo(f"    row {index + 1}: {len(done)}/{len(names)}"
+                     + (f"   still to do: {', '.join(missing[:6])}"
+                        + (" ..." if len(missing) > 6 else "") if missing else "   done"))
+        elif pressed.isdigit() and pressed != "0":
+            # Jump to a row. Spotting a mistake near the end of a long run
+            # should not mean arrowing back through four rows to reach it.
+            target = int(pressed) - 1
+            if target < len(grid.rows):
+                position = sum(len(row) for row in grid.rows[:target])
+                candidate = None
+            else:
+                echo(f"  there is no row {pressed}")
         else:
             echo(f"  '{pressed}' does nothing here")
 
