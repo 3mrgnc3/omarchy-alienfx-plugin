@@ -47,7 +47,12 @@ def test_the_plugin_id_follows_the_registry_rules(manifest):
     assert plugin_id
     assert "/" not in plugin_id and ".." not in plugin_id
     assert not plugin_id.startswith("/")
-    assert plugin_id.count(".") == 1, "id must be <author>.<name>"
+    # The registry itself only forbids "/", ".." and a leading "/". One dot is
+    # the <author>.<name> convention, not a rule - another installed plugin
+    # here is io.github.0x1ocean.server-mode, with three - so require at least
+    # one rather than exactly one.
+    assert "." in plugin_id, "id should be <author>.<name>"
+    assert not plugin_id.startswith(".") and not plugin_id.endswith(".")
 
 
 def test_entry_points_exist_and_cannot_escape_the_plugin_folder(manifest):

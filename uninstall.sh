@@ -4,7 +4,7 @@
 # Keeps your data by default: profiles, keymap and current state stay in
 # ~/.config/omarchy-alienfx-plugin. Pass --purge to remove those too.
 #
-# Run this BEFORE `omarchy plugin remove mrgnc.alienfx`. That command deletes
+# Run this BEFORE `omarchy plugin remove 3mrgnc3.alienfx`. That command deletes
 # the plugin folder, which is all Omarchy knows about - the CLI, the udev rule
 # and the systemd units live outside it and would be left behind.
 #
@@ -12,7 +12,7 @@
 
 set -uo pipefail
 
-PLUGIN_ID="mrgnc.alienfx"
+PLUGIN_ID="3mrgnc3.alienfx"
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 SHARE_DIR="$HOME/.local/share/omarchy-alienfx-plugin"

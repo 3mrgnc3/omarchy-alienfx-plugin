@@ -63,7 +63,7 @@ Two ways, both supported.
 omarchy plugin add https://github.com/3mrgnc3/omarchy-alienfx-plugin.git --enable
 ```
 
-That clones the repo into `~/.config/omarchy/plugins/mrgnc.alienfx/` and puts the
+That clones the repo into `~/.config/omarchy/plugins/3mrgnc3.alienfx/` and puts the
 alien head on the bar. Click it and the popup will offer **Complete setup**, because
 `omarchy plugin add` installs only the QML — the udev rule that makes the hardware
 reachable without `sudo`, the CLI that drives it, and the systemd unit that restores
@@ -89,7 +89,7 @@ It sets up:
 
 - `~/.local/bin/alienfx-ctl` plus its package in `~/.local/share/omarchy-alienfx-plugin/`
 - `/etc/udev/rules.d/60-omarchy-alienfx.rules` (the one step needing root)
-- the plugin in `~/.config/omarchy/plugins/mrgnc.alienfx/`, enabled on the bar
+- the plugin in `~/.config/omarchy/plugins/3mrgnc3.alienfx/`, enabled on the bar
 - a `theme-set` hook drop-in, so theme switches repaint the lights
 - systemd `--user` units that restore your lighting at login and after suspend
 
@@ -114,7 +114,7 @@ Missing packages are installed with `omarchy pkg add`, falling back to `pacman`.
 ./uninstall.sh --purge    # removes those too
 ```
 
-Run this **before** `omarchy plugin remove mrgnc.alienfx`. That command deletes the
+Run this **before** `omarchy plugin remove 3mrgnc3.alienfx`. That command deletes the
 plugin folder, which is all Omarchy knows about — the CLI, the udev rule and the
 systemd units live outside it and would be left behind. `uninstall.sh` removes the
 folder for you via `omarchy plugin remove` anyway, unless it is running from inside

@@ -7,7 +7,7 @@
 # Works two ways:
 #   1. from a clone:  git clone ... && cd ... && ./install.sh
 #   2. from the plugin dir, after `omarchy plugin add <url>` cloned the repo
-#      into ~/.config/omarchy/plugins/mrgnc.alienfx/ - the popup's
+#      into ~/.config/omarchy/plugins/3mrgnc3.alienfx/ - the popup's
 #      "Complete setup" button runs it from there.
 #
 # `omarchy plugin add` installs only the QML. The udev rule that makes the
@@ -18,7 +18,7 @@
 set -uo pipefail
 
 REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_ID="mrgnc.alienfx"
+PLUGIN_ID="3mrgnc3.alienfx"
 
 SHARE_DIR="$HOME/.local/share/omarchy-alienfx-plugin"
 BIN_DIR="$HOME/.local/bin"

@@ -22,8 +22,8 @@ import "Model.js" as Model
 // and a crash in here would take the bar down with it.
 Panel {
   id: root
-  moduleName: "mrgnc.alienfx"
-  ipcTarget: "mrgnc.alienfx"
+  moduleName: "3mrgnc3.alienfx"
+  ipcTarget: "3mrgnc3.alienfx"
   // The Panel base registers an IpcHandler for ipcTarget automatically, and a
   // target only permits one. We declare our own below (it adds refresh()), so
   // hand ownership over rather than letting the two collide.
@@ -488,7 +488,7 @@ Panel {
   }
 
   IpcHandler {
-    target: "mrgnc.alienfx"
+    target: "3mrgnc3.alienfx"
     function open(): void { root.open() }
     function close(): void { root.close() }
     function toggle(): void { root.toggle() }
