@@ -1,10 +1,11 @@
 """Keymap validation and import."""
 
 import json
+import os
 
 import pytest
 
-from alienfx_ctl import keymap
+from alienfx_ctl import hardware, keymap, state
 
 
 def good():
@@ -245,3 +246,54 @@ def test_the_wizard_can_write_one(config_root, monkeypatch):
     keymap.validate(written)
     assert written["keyboard"] == "zones"
     assert list(written["zones"]) == list(ZONED["zones"])
+
+
+# ------------------------------------------------- keymaps contributed by users
+#
+# Supporting another model is meant to be a data change with no code behind it:
+# drop alienware-<slug>-keymap.json beside the reference map and an owner of
+# that machine gets it automatically.
+
+def test_a_contributed_keymap_for_this_model_is_preferred_over_the_reference(
+        config_root, tmp_path, monkeypatch, shipped_keymap):
+    """Without this the contributed file would sit in the package unused while
+    its owner silently got the m16 R2 map - wrong indices, no error."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    reference = data_dir / "m16r2-keymap.json"
+    reference.write_text(json.dumps(shipped_keymap))
+    monkeypatch.setattr(keymap, "SHIPPED_KEYMAP", str(reference))
+    monkeypatch.setattr(keymap.hardware, "model", lambda: "Alienware m15 R3")
+    monkeypatch.setattr(keymap.hardware, "keymap_filename",
+                        lambda text="": "alienware-m15-r3-keymap.json")
+
+    assert keymap.load()["device"] == shipped_keymap["device"], "reference first"
+
+    mine = dict(shipped_keymap, device="Alienware m15 R3")
+    (data_dir / "alienware-m15-r3-keymap.json").write_text(json.dumps(mine))
+    assert keymap.load()["device"] == "Alienware m15 R3"
+
+
+def test_the_user_s_own_keymap_still_wins_over_a_contributed_one(
+        config_root, tmp_path, monkeypatch, shipped_keymap):
+    """Someone who probed their own machine must not be overridden by a map
+    contributed for the same model."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "m16r2-keymap.json").write_text(json.dumps(shipped_keymap))
+    monkeypatch.setattr(keymap, "SHIPPED_KEYMAP", str(data_dir / "m16r2-keymap.json"))
+    contributed = dict(shipped_keymap, device="contributed")
+    (data_dir / hardware.keymap_filename()).write_text(json.dumps(contributed))
+
+    mine = dict(shipped_keymap, device="mine")
+    state.write_json_atomic(keymap.user_keymap_path(), mine)
+    assert keymap.load()["device"] == "mine"
+
+
+def test_every_bundled_keymap_is_valid():
+    """A contributed map that does not validate would break the machine it was
+    meant to help, so this runs over whatever is in the package."""
+    import glob
+    directory = os.path.dirname(keymap.SHIPPED_KEYMAP)
+    for path in glob.glob(os.path.join(directory, "*keymap*.json")):
+        keymap.validate(keymap.load_file(path))

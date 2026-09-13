@@ -162,10 +162,37 @@ def load_file(path: str) -> dict:
     return validate(data)
 
 
+def bundled_keymap_path(model: str = "") -> str:
+    """Where a keymap contributed for *this* model would live, if one has been.
+
+    Contributed maps are named by the same convention as the user's own -
+    ``alienware-<slug>-keymap.json`` - so the lookup is mechanical and adding
+    support for a model is a data change with no code behind it.
+    """
+    return os.path.join(os.path.dirname(SHIPPED_KEYMAP),
+                        hardware.keymap_filename(model))
+
+
 def load() -> dict:
-    """Load the user's keymap if present, else the one that ships with us."""
+    """The best keymap for this machine.
+
+    In order: the user's own, then one contributed for this exact model, then
+    the reference map as a last resort.
+
+    That middle step is the whole point of accepting keymaps from other people.
+    Without it a contributed m15 R3 map could sit in the package unused while an
+    m15 R3 owner silently got the m16 R2 map - wrong indices, wrong keys, and no
+    error to explain it.
+
+    The reference map is still the final fallback rather than an error, because
+    a keyboard lit with roughly the right shape beats a dark one, and the wizard
+    is one click away.
+    """
     if has_user_keymap():
         return load_file(user_keymap_path())
+    contributed = bundled_keymap_path()
+    if os.path.isfile(contributed):
+        return load_file(contributed)
     if os.path.isfile(SHIPPED_KEYMAP):
         return load_file(SHIPPED_KEYMAP)
     raise KeymapError("no keymap available - run 'alienfx-ctl keymap wizard'")

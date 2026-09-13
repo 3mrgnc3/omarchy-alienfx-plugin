@@ -10,6 +10,37 @@ palette across all four lighting zones, and repaints itself whenever you switch 
 
 Runs unprivileged. No `sudo`, no root daemon.
 
+## Which laptops it works on
+
+**Fully tested on one machine: an Alienware m16 R2.** Everything else is
+work in progress, and help is genuinely wanted.
+
+The parts that are the same on every Alienware are already model-independent.
+The lighting protocol doesn't vary. The controllers are found by their USB
+vendor and the shape of the HID reports they declare, not by a hard-coded
+product id, so a different model's controller should still be recognised.
+Chassis zones — touchpad ring, lid logo, power button, Tron strips, anything
+else — come from a per-model file rather than the code, and laptops that light
+the keyboard as four zones instead of per key are supported too.
+
+The one thing that genuinely differs between machines is **which LED belongs to
+which key**, and that cannot be worked out remotely. LED numbering follows the
+circuit board, not the keyboard: on the tested machine `backspace` is 34 where
+the obvious pattern says 33, and the left arrow is 133 where a formula predicts
+113. So this plugin ships no LED numbers that anybody guessed — a wrong number
+silently lights the wrong key, which is worse than shipping none.
+
+Instead there's a **guided wizard**. It lights one LED at a time and you walk it
+onto the right key with the arrow keys; it guesses the next one for you, and
+learns from your corrections. Ten minutes, and your machine is mapped.
+
+**If you own a different AlienFX laptop, please send the keymap back.** Adding a
+model is a data change with no code behind it: drop the file in and every owner
+of that machine gets it automatically. [CONTRIBUTING.md](CONTRIBUTING.md) walks
+through generating one and submitting it, and bug reports from unfamiliar
+hardware are just as welcome — `alienfx-ctl devices` prints everything needed to
+diagnose a machine I can't see.
+
 ## What it controls
 
 | Zone | Controller | Addressing |
@@ -244,13 +275,22 @@ tooling's hard-coded `hidraw0`/`hidraw1` would have aimed chassis packets at it.
 a node was or was not chosen on an unfamiliar machine. `ALIENFX_ELC_DEV` /
 `ALIENFX_KBD_DEV` pin a node by hand; an override still has to pass the same check.
 
-## Other machines
+## Other machines, in detail
+
+See [Which laptops it works on](#which-laptops-it-works-on) for the short
+version and [CONTRIBUTING.md](CONTRIBUTING.md) for how to add yours. This
+section is the mechanism.
 
 Nothing is hard-coded to one model. The machine identifies itself from DMI
 (`Alienware m16 R2`, sku, BIOS) and its keymap is stored per model as
 `~/.config/omarchy-alienfx-plugin/keymap/alienware-<model>-keymap.json`, so a config
 directory can move between machines without them fighting over one file. A plain
 `keymap.json` is still honoured for installs that predate this.
+
+A keymap contributed for your exact model, bundled in `cli/src/alienfx_ctl/data/`
+under the same name, is used ahead of the reference map — so adding support for a
+machine is a data change with no code behind it. Your own probed keymap always
+wins over a bundled one.
 
 **Zones come from the keymap**, not from a constant:
 
@@ -324,7 +364,7 @@ adjacent to a named key — reach for it first if a single key ever behaves oddl
 manifest.json  Panel.qml  Model.js     the Quickshell plugin
 cli/src/alienfx_ctl/                   the CLI: device, apiv4, apiv5, gradient, palette, …
 cli/src/alienfx_ctl/data/              the reference keymap and the bundled shapes
-cli/tests/                             502 tests, no hardware required
+cli/tests/                             505 tests, no hardware required
 share/udev/                            the uaccess rule
 share/systemd/                         restore + resume units
 share/omarchy/hooks/theme-set.d/       the theme-switch hook
@@ -357,7 +397,7 @@ QML reads, the bundled layouts, and the shell scripts parsing. No hardware
 needed for any of it.
 
 ```bash
-cd cli && python3 -m pytest tests -q     # 502 tests, no hardware needed
+cd cli && python3 -m pytest tests -q     # 505 tests, no hardware needed
 ./cli/bin/alienfx-ctl devices            # run from the checkout, no install
 omarchy plugin validate .                # check the manifest
 ```
