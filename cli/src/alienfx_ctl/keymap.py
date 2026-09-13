@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 from . import hardware, state
 from .apiv5 import KBD_LED_COUNT
@@ -17,6 +18,94 @@ from .apiv5 import KBD_LED_COUNT
 SHIPPED_KEYMAP = os.path.join(os.path.dirname(__file__), "data", "m16r2-keymap.json")
 
 _REQUIRED_KEYS = ("key_to_index", "grid_positions")
+
+# ---------------------------------------------------------------- limits
+#
+# A keymap is UNTRUSTED INPUT. The whole point of the contribution flow is that
+# people send each other these files, and one may be hostile or simply corrupt.
+# Nothing here repairs a bad value; it is rejected, because a keymap that paints
+# the wrong keys is more confusing than a clear error.
+#
+# The bounds are generous against real data - the reference keymap has 85 keys,
+# the longest name is 10 characters of lowercase letters and digits, and the
+# grid reaches row 5, column 16 - so a legitimate keyboard, including a much
+# larger one, fits comfortably.
+
+#: Refuse to read a file larger than this before parsing it. The reference
+#: keymap is 8.8KB. Parsing is what allocates, so the check has to come first.
+MAX_FILE_BYTES = 1 << 20
+
+#: Enough for any keyboard with a keypad and a macro column, and small enough
+#: that a hostile file cannot drive a huge paint loop.
+MAX_KEYS = 512
+
+#: Key and zone names. Long enough for "apostrophe" several times over.
+MAX_NAME_LENGTH = 32
+
+#: Grid bounds. `layout.render` indents by column, so an unbounded column is a
+#: memory-exhaustion primitive: col=10**9 asked for a six-gigabyte line.
+MAX_GRID_ROW = 31
+MAX_GRID_COL = 63
+
+#: Free text shown to the user: the model name, the Fn legends.
+MAX_TEXT_LENGTH = 64
+
+#: Chassis lights. An id becomes one byte of a HID packet; more ids than this
+#: could not fit the report anyway.
+MAX_ZONE_ID = 255
+MAX_ZONES = 32
+MAX_IDS_PER_ZONE = 16
+
+#: Names are restricted rather than merely length-capped. They are used as
+#: dictionary keys, matched against layouts, and - the reason that matters -
+#: printed into the wizard's terminal while it is in raw mode. A name carrying
+#: escape bytes can retitle the window, clear the screen, or hide text in the
+#: very display the user is reading to map their keys.
+_SAFE_NAME = re.compile(r"^[a-z0-9_]{1,%d}$" % MAX_NAME_LENGTH)
+
+#: Free text is allowed punctuation, because legends look like `` ` ~ `` and
+#: "F7 (kbd_backlight)". Control characters are not, for the same reason.
+_SAFE_TEXT = re.compile(r"^[ -~]{0,%d}$" % MAX_TEXT_LENGTH)
+
+
+def _clip(value) -> str:
+    """A value safe to put in an error message.
+
+    repr() escapes control characters, so the message cannot itself carry an
+    escape sequence to the terminal; the truncation stops a megabyte-long name
+    being echoed back.
+    """
+    text = repr(value)
+    return text if len(text) <= 40 else text[:37] + "..."
+
+
+def _check_name(value, where: str) -> str:
+    if not isinstance(value, str):
+        raise KeymapError(f"{where}: name must be a string, got {_clip(value)}")
+    if not _SAFE_NAME.match(value):
+        raise KeymapError(
+            f"{where}: name {_clip(value)} is not allowed - names must be 1 to "
+            f"{MAX_NAME_LENGTH} characters of a-z, 0-9 or underscore")
+    return value
+
+
+def _check_text(value, where: str) -> str:
+    if not isinstance(value, str):
+        raise KeymapError(f"{where}: must be text, got {_clip(value)}")
+    if not _SAFE_TEXT.match(value):
+        raise KeymapError(
+            f"{where}: {_clip(value)} is not allowed - printable ASCII only, "
+            f"at most {MAX_TEXT_LENGTH} characters")
+    return value
+
+
+def _check_int(value, where: str, low: int, high: int) -> int:
+    # bool is an int in Python, and True would sail through a range check.
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise KeymapError(f"{where}: must be an integer, got {_clip(value)}")
+    if not low <= value <= high:
+        raise KeymapError(f"{where}: {value} is outside {low}..{high}")
+    return value
 
 #: What kind of keyboard a machine has.
 #:
@@ -101,23 +190,43 @@ def discover_keymaps():
 def validate(data) -> dict:
     """Check a keymap is structurally sound, returning it on success.
 
-    Rejects rather than repairs: a keymap with bad indices would paint the
-    wrong keys, which is more confusing than a clear error.
+    **Treats the keymap as untrusted input.** These files are meant to be shared
+    between users, so one may be hostile or simply corrupt. Every value is
+    checked for type, length and range; nothing is repaired, because a keymap
+    that paints the wrong keys is more confusing than a clear error.
+
+    The checks that are about safety rather than correctness:
+
+    - Names are restricted to ``a-z0-9_`` and free text to printable ASCII,
+      because both are printed into the wizard's terminal while it is in raw
+      mode. A name carrying escape bytes could retitle the window, clear the
+      screen, or hide text in the display the user is reading to map their keys.
+    - Grid columns are bounded, because ``layout.render`` indents by column - an
+      unbounded one is a memory-exhaustion primitive.
+    - The key count is bounded, so a file cannot drive an enormous paint loop.
+    - Chassis light ids are bounded to a byte, because each becomes one byte of
+      a HID packet; an out-of-range id used to reach ``bytes()`` and raise.
     """
     if not isinstance(data, dict):
         raise KeymapError("keymap must be a JSON object")
 
-    kind = str(data.get("keyboard") or KEYBOARD_PER_KEY)
+    kind = data.get("keyboard") or KEYBOARD_PER_KEY
     if kind not in (KEYBOARD_PER_KEY, KEYBOARD_ZONES):
         raise KeymapError(
-            f"unknown keyboard kind {kind!r} (expected "
+            f"unknown keyboard kind {_clip(kind)} (expected "
             f"{KEYBOARD_PER_KEY!r} or {KEYBOARD_ZONES!r})")
+
+    # Free text that reaches the user's terminal by way of `keymap show`.
+    for field in ("device", "model_slug", "vid_pid"):
+        if field in data and data[field] is not None:
+            _check_text(data[field], f"{field}")
+
+    _check_zones(data)
 
     if kind == KEYBOARD_ZONES:
         # No per-key data to check - the keyboard is chassis zones - but there
         # had better be some zones, or the keymap describes nothing at all.
-        declared = data.get("zones")
-        if not isinstance(declared, dict) or not declared:
+        if not data.get("zones"):
             raise KeymapError(
                 f"a '{KEYBOARD_ZONES}' keymap needs a non-empty 'zones' object")
         return data
@@ -129,32 +238,83 @@ def validate(data) -> dict:
     key_to_index = data["key_to_index"]
     grid_positions = data["grid_positions"]
 
+    if len(key_to_index) > MAX_KEYS:
+        raise KeymapError(
+            f"keymap names {len(key_to_index)} keys; the limit is {MAX_KEYS}")
+    if len(grid_positions) > MAX_KEYS:
+        raise KeymapError(
+            f"keymap positions {len(grid_positions)} keys; the limit is {MAX_KEYS}")
+
     for name, index in key_to_index.items():
-        if not isinstance(index, int) or isinstance(index, bool):
-            raise KeymapError(f"key_to_index[{name!r}] must be an integer")
-        if not 0 <= index <= _MAX_LED_INDEX:
-            raise KeymapError(f"key_to_index[{name!r}] = {index} is outside 0..{_MAX_LED_INDEX}")
+        _check_name(name, "key_to_index")
+        _check_int(index, f"key_to_index[{_clip(name)}]", 0, _MAX_LED_INDEX)
 
     for name, position in grid_positions.items():
+        _check_name(name, "grid_positions")
+        where = f"grid_positions[{_clip(name)}]"
         if isinstance(position, dict):
             if "row" not in position or "col" not in position:
-                raise KeymapError(f"grid_positions[{name!r}] needs 'row' and 'col'")
+                raise KeymapError(f"{where} needs 'row' and 'col'")
             row, col = position["row"], position["col"]
         elif isinstance(position, (list, tuple)) and len(position) == 2:
             row, col = position
         else:
-            raise KeymapError(f"grid_positions[{name!r}] must be {{row, col}} or [row, col]")
-        for label, value in (("row", row), ("col", col)):
-            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-                raise KeymapError(f"grid_positions[{name!r}].{label} must be a non-negative integer")
+            raise KeymapError(f"{where} must be {{row, col}} or [row, col]")
+        _check_int(row, f"{where}.row", 0, MAX_GRID_ROW)
+        _check_int(col, f"{where}.col", 0, MAX_GRID_COL)
+
+    legends = data.get("secondary_functions")
+    if legends is not None:
+        if not isinstance(legends, dict):
+            raise KeymapError("secondary_functions must be an object")
+        if len(legends) > MAX_KEYS:
+            raise KeymapError(f"secondary_functions has more than {MAX_KEYS} entries")
+        for name, value in legends.items():
+            _check_name(name, "secondary_functions")
+            _check_text(value, f"secondary_functions[{_clip(name)}]")
 
     return data
 
 
+def _check_zones(data) -> None:
+    """Validate a keymap's chassis zone block, if it has one."""
+    declared = data.get("zones")
+    if declared is None:
+        return
+    if not isinstance(declared, dict):
+        raise KeymapError("zones must be an object")
+    if len(declared) > MAX_ZONES:
+        raise KeymapError(f"keymap declares {len(declared)} zones; the limit is {MAX_ZONES}")
+    for name, ids in declared.items():
+        _check_name(name, "zones")
+        where = f"zones[{_clip(name)}]"
+        if isinstance(ids, int) and not isinstance(ids, bool):
+            ids = [ids]
+        if not isinstance(ids, (list, tuple)):
+            raise KeymapError(f"{where}: must be a light id or a list of them")
+        if not ids:
+            raise KeymapError(f"{where}: no light ids")
+        if len(ids) > MAX_IDS_PER_ZONE:
+            raise KeymapError(
+                f"{where}: {len(ids)} light ids; the limit is {MAX_IDS_PER_ZONE}")
+        for light in ids:
+            _check_int(light, where, 0, MAX_ZONE_ID)
+
+
 def load_file(path: str) -> dict:
     try:
+        # Size first: parsing is what allocates, so checking afterwards would be
+        # checking after the damage. The reference keymap is 8.8KB.
+        size = os.path.getsize(path)
+        if size > MAX_FILE_BYTES:
+            raise KeymapError(
+                f"{path}: {size} bytes is larger than the {MAX_FILE_BYTES} byte limit")
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
+    except RecursionError as exc:
+        raise KeymapError(f"{path}: JSON nested too deeply") from exc
+    except UnicodeDecodeError as exc:
+        raise KeymapError(f"{path}: not valid UTF-8 ({exc})") from exc
     except OSError as exc:
         raise KeymapError(f"{path}: {exc}") from exc
     except json.JSONDecodeError as exc:

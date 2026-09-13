@@ -9,3 +9,8 @@ build/
 # Root-owned leftover from an old /etc install; superseded by the
 # archive-reference branch.
 archive/
+
+# Photos: kept locally, never committed. Phone images carry GPS EXIF, and
+# `omarchy plugin add` does a full clone, so anything committed here would be
+# downloaded by every user forever.
+docs/images/
