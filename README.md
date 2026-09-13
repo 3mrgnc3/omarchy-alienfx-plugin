@@ -37,8 +37,9 @@ learns from your corrections. Ten minutes, and your machine is mapped.
 **If you own a different AlienFX laptop, please send the keymap back.** Adding a
 model is a data change with no code behind it: drop the file in and every owner
 of that machine gets it automatically. [CONTRIBUTING.md](CONTRIBUTING.md) walks
-through generating one and submitting it, and bug reports from unfamiliar
-hardware are just as welcome — `alienfx-ctl devices` prints everything needed to
+through generating one; submitting it is a pull request adding a single file to
+`cli/src/alienfx_ctl/data/`. Bug reports from unfamiliar hardware are just as
+welcome — `alienfx-ctl devices` prints everything needed to
 diagnose a machine I can't see.
 
 ## What it controls

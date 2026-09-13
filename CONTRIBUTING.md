@@ -139,34 +139,63 @@ nothing else to do, and no keys to map.
 
 ## Submitting your keymap
 
-Open an issue with:
+**Send it as a pull request containing one new file.** Nothing else needs to
+change — no code, no registration, no edit to any list.
 
-1. **The keymap file itself** — the JSON from the path above, attached or pasted.
-2. **Your exact model**, from `cat /sys/class/dmi/id/product_name`.
-3. **The output of `alienfx-ctl devices`**.
-4. **What actually works**: does the gradient run corner to corner, are all keys
-   lit, do the chassis zones light the right things? Say what is wrong as well
-   as what is right — a keymap covering 80 of 90 keys is still worth having, and
-   honesty about the gaps saves the next person repeating your work.
+The wizard already wrote the file under exactly the right name, so copy it
+across without renaming it:
+
+```bash
+cp ~/.config/omarchy-alienfx-plugin/keymap/alienware-*-keymap.json \
+   cli/src/alienfx_ctl/data/
+```
+
+That gives you a single added file:
+
+```
+cli/src/alienfx_ctl/data/alienware-<model>-keymap.json
+```
+
+for example `alienware-m15-r3-keymap.json` or `alienware-x17-r2-keymap.json`.
+The name is how the plugin finds it: an owner of that model gets your keymap
+automatically, ahead of the reference map, while anyone who has probed their own
+machine keeps theirs. **Keep the filename the wizard produced** — it is derived
+from what the firmware reports about the machine, so a hand-edited name will
+simply never match.
+
+### The pull request
+
+One file, and in the description:
+
+1. **Your exact model** — `cat /sys/class/dmi/id/product_name`.
+2. **The output of `alienfx-ctl devices`.**
+3. **What actually works.** Does the gradient run corner to corner? Are all the
+   keys lit? Do the chassis zones light the things they claim to? Say what is
+   wrong as well as what is right — a keymap covering 80 of 90 keys is still
+   worth having, and being straight about the gaps saves the next owner of that
+   machine repeating your work.
 
 A photo of the lit keyboard is the most convincing evidence there is, if you
 don't mind taking one.
 
-### What happens to it
+Please don't include your `current.json`, profiles, or anything else from your
+config directory. One keymap file per pull request, so each model can be
+accepted or discussed on its own.
 
-Contributed keymaps live beside the reference one:
+### What is checked
 
+The local test suite validates every bundled keymap, so a malformed file cannot
+reach a release:
+
+```bash
+cd cli && python3 -m pytest tests -q
 ```
-cli/src/alienfx_ctl/data/alienware-<slug>-keymap.json
-```
 
-Nothing else has to change. The lookup is by model slug, so an owner of that
-machine gets your keymap automatically, ahead of the reference map, while
-anyone who has probed their own machine keeps theirs. Adding a model is a data
-change with no code behind it.
+Run it before opening the pull request. It needs no hardware and no network.
 
-Every bundled keymap is validated by the test suite, so a malformed one cannot
-reach a release.
+Beyond that, review is mostly taking your word for it — nobody here has your
+laptop. That is exactly why the honest account of what works matters more than a
+tidy diff.
 
 ## Other contributions
 
