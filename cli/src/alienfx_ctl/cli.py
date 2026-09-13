@@ -404,9 +404,21 @@ def cmd_commit(args) -> int:
     Interactive changes all go out --fast so nothing the user is driving pays
     for the power button's ~2s NVRAM walk. This is what the UI calls once the
     user has settled, so that colour still survives a power transition.
+
+    **Never saves.** It re-applies state that is already on disk, so it has
+    nothing new to record - and writing back the snapshot it loaded is actively
+    harmful. The snapshot is read *before* the hardware lock, the durable apply
+    then holds that lock for seconds, and anything the user changed meanwhile
+    was silently overwritten by the stale copy on the way out.
+
+    That was the ZoneSync toggle bouncing: the click applied and saved
+    correctly, then a commit already in flight wrote the pre-click value back
+    over it. The UI read the old value and moved the switch back, so the command
+    looked like it had been ignored. `restore` and `profile load` already got
+    this right; this was the one path that did not.
     """
     st = state.load_state()
-    return _apply(st, list(device.zone_names()), args)
+    return _apply(st, list(device.zone_names()), args, save=False)
 
 
 def cmd_restore(args) -> int:

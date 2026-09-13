@@ -48,6 +48,20 @@ def spy(monkeypatch):
     return calls
 
 
+class _Args:
+    """The attributes _apply and the commands read off argparse results."""
+    def __init__(self, **kw):
+        defaults = dict(dry_run=False, fast=True, drop_if_busy=False,
+                        persist=False, no_save=False, verbose=False, zones="all")
+        defaults.update(kw)
+        for name, value in defaults.items():
+            setattr(self, name, value)
+
+
+def _args(**kw):
+    return _Args(**kw)
+
+
 def test_an_intermediate_frame_is_droppable(spy, config_root):
     cli._apply(state.load_state(), ["kbd"], Args(fast=True, drop_if_busy=True))
     assert spy["drop_if_busy"] is True
@@ -243,3 +257,83 @@ def test_a_state_file_carrying_the_retired_keys_cleans_itself(config_root):
     on_disk = json.load(open(state.state_path()))
     for key in ("saturation", "min_saturation", "value", "kbd_mode", "themesync"):
         assert key not in on_disk, f"{key} was written back"
+
+
+# ------------------------------------------------- concurrent writes to state
+#
+# The UI fires a durable `commit` on a settle timer while the user is still
+# clicking. commit loads state, holds the hardware lock for seconds doing the
+# power button's NVRAM walk, and used to save its snapshot on the way out -
+# overwriting anything changed in between.
+#
+# That was the ZoneSync toggle "bouncing": the click applied and saved
+# correctly, then an in-flight commit wrote the pre-click value back over it.
+# The UI read the old value and moved the switch back, so a command that had
+# worked looked ignored.
+
+def test_commit_never_writes_state(config_root, monkeypatch):
+    """It re-applies what is already on disk, so it has nothing to record."""
+    from alienfx_ctl import cli, engine
+    saved = []
+    monkeypatch.setattr(state, "save_state", lambda st: saved.append(dict(st)))
+    monkeypatch.setattr(engine, "apply", lambda st, zones, **kw: {})
+
+    cli.cmd_commit(_args())
+    assert saved == [], "commit wrote state back"
+
+
+def test_a_change_made_during_a_commit_survives_it(config_root, monkeypatch):
+    """The race, modelled exactly: commit takes its snapshot, the user changes
+    something, commit finishes. The user's change must still be on disk."""
+    from alienfx_ctl import cli, engine
+
+    st = state.load_state()
+    st["zonesync"] = False
+    state.save_state(st)
+
+    def slow_apply(st_arg, zones, **kw):
+        # While commit is inside the lock, the user toggles ZoneSync on.
+        live = state.load_state()
+        live["zonesync"] = True
+        state.save_state(live)
+        return {}
+
+    monkeypatch.setattr(engine, "apply", slow_apply)
+    cli.cmd_commit(_args())
+
+    assert state.load_state()["zonesync"] is True, \
+        "commit clobbered a change made while it was running"
+
+
+def test_restore_and_profile_load_do_not_write_state_either(config_root, monkeypatch):
+    """The two paths that already had this right; pinned so they keep it."""
+    from alienfx_ctl import cli, engine
+    saved = []
+    monkeypatch.setattr(state, "save_state", lambda st: saved.append(dict(st)))
+    monkeypatch.setattr(engine, "apply", lambda st, zones, **kw: {})
+    cli.cmd_restore(_args())
+    assert saved == [], "restore wrote state back"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("zonesync", True),
+    ("brightness", 200),
+    ("intensity", 7),
+    ("selected_zone", "logo"),
+])
+def test_any_settled_change_survives_a_concurrent_commit(config_root, monkeypatch,
+                                                         field, value):
+    """Generalises the ZoneSync race to every control the panel drives. The UI
+    fires a durable commit on a settle timer while the user is still adjusting
+    things, so this is not a rare interleaving - it is the normal one."""
+    from alienfx_ctl import cli, engine
+
+    def user_changes_something(st_arg, zones, **kw):
+        live = state.load_state()
+        live[field] = value
+        state.save_state(live)
+        return {}
+
+    monkeypatch.setattr(engine, "apply", user_changes_something)
+    cli.cmd_commit(_args())
+    assert state.load_state()[field] == value, f"commit clobbered {field}"

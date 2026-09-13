@@ -85,13 +85,79 @@ Panel {
   readonly property color previewB: Model.hexColor(root.uiColorB !== "" ? root.uiColorB
                                                   : Model.complementHex(root.uiColorA))
 
-  // While the user is driving, an in-flight state read must not overwrite what
-  // they just set. Any local edit marks a settling window; reconciliation waits
-  // for quiet.
+  // What the user has chosen always wins over what the backend last said.
+  //
+  // The UI never waits for the hardware to agree before showing a change: the
+  // control moves immediately, the command goes out, and the state read that
+  // follows is only allowed to *confirm* it. A reply that was already in flight
+  // when the user acted describes a world older than their click, so it must
+  // not be applied to the controls at all.
+  //
+  // This used to be a pure time window - "has the user been quiet for 900ms?" -
+  // and that cannot express staleness. A read started before a click but
+  // landing after the window still carried the pre-click value and pushed the
+  // control back, which is exactly the ZoneSync toggle bouncing off on the
+  // first press: the command was still being applied, the reply in hand
+  // predated it, and the toggle snapped back to what the user had just changed.
+  //
+  // `editSeq` counts local edits. A read records the count it started at, and
+  // its reply is adopted only if nothing has been touched since. No timing
+  // assumption, no dependence on how long the hardware takes.
+  property int editSeq: 0
+  property int readSeq: -1
   property double localEditAt: 0
   readonly property int settleMs: 900
-  function touch() { root.localEditAt = Date.now(); settleTimer.restart() }
+  function touch() {
+    root.editSeq += 1
+    root.localEditAt = Date.now()
+    settleTimer.restart()
+  }
   function editing() { return (Date.now() - root.localEditAt) < root.settleMs }
+
+  // True when the reply we are holding was requested before the user's most
+  // recent change, and so describes a state they have already moved on from.
+  function replyIsStale() { return root.readSeq !== root.editSeq }
+
+  // Discrete choices the user has made that the backend has not confirmed yet.
+  //
+  // Staleness alone is not enough. A command can still be *being applied* when
+  // a perfectly current read goes out - the hardware lock serialises against
+  // the ~2s power-button write, so a toggle can take over a second to land,
+  // while the settling window is 900ms. That read would truthfully report the
+  // old value and the control would bounce, just later.
+  //
+  // So a field the user has changed is not reconciled at all until the backend
+  // agrees with it. Until then the user's choice stands, and a reply that
+  // contradicts it re-sends the command once rather than overwriting them. The
+  // single retry is deliberate: if the hardware genuinely refuses, the panel
+  // settles on the truth instead of fighting it forever.
+  property var pending: ({})
+
+  function intend(field, value, argv) {
+    root.pending[field] = { value: value, argv: argv, retried: false }
+    root.touch()
+    root.run(argv)
+  }
+
+  // Returns true if `field` should be left alone this time round.
+  function unconfirmed(field, reported) {
+    var want = root.pending[field]
+    if (want === undefined) return false
+    var same = (typeof want.value === "string" && typeof reported === "string")
+      ? want.value.toLowerCase() === reported.toLowerCase()
+      : want.value === reported
+    if (same) {
+      delete root.pending[field]     // the backend caught up
+      return false
+    }
+    if (!want.retried) {
+      want.retried = true
+      root.run(want.argv)            // say it once more, then let it go
+      return true
+    }
+    delete root.pending[field]
+    return false
+  }
 
   // True while any slider is under the pointer. Reconciliation must never move
   // a control the user is physically holding.
@@ -192,7 +258,12 @@ Panel {
 
   function refresh() {
     if (!root.cliResolved) { resolveCli(); return }
-    if (!stateProc.running) stateProc.running = true
+    // Stamp the read with the edit count it was started at, so its reply can be
+    // recognised as stale if the user changes anything while it is in flight.
+    if (!stateProc.running) {
+      root.readSeq = root.editSeq
+      stateProc.running = true
+    }
   }
 
   function ingest(text) {
@@ -211,8 +282,10 @@ Panel {
     root.loaded = true
     root.errorText = ""
 
-    // Adopt control values only once the user has stopped touching them.
-    if (!root.editing()) adoptFromState()
+    // Adopt control values only from a reply that is not older than the user's
+    // last action. The settling window stays as a second line of defence for
+    // the case where a reply is current but the user is mid-gesture.
+    if (!root.replyIsStale() && !root.editing()) adoptFromState()
   }
 
   function adoptFromState() {
@@ -221,10 +294,15 @@ Panel {
     // Belt and braces: a live drag owns its control outright, whatever the
     // settling window thinks.
     if (root.anyDragging) return
-    root.uiThemesync = s.themesync === true
-    root.uiZonesync = s.zonesync !== false
-    root.uiEffect = s.effect ? String(s.effect) : "gradient"
-    root.uiZone = s.selected_zone ? String(s.selected_zone) : "kbd"
+    var themesync = s.themesync === true
+    var zonesync = s.zonesync !== false
+    var effect = s.effect ? String(s.effect) : "gradient"
+    var zone = s.selected_zone ? String(s.selected_zone) : "kbd"
+
+    if (!root.unconfirmed("themesync", themesync)) root.uiThemesync = themesync
+    if (!root.unconfirmed("zonesync", zonesync)) root.uiZonesync = zonesync
+    if (!root.unconfirmed("effect", effect)) root.uiEffect = effect
+    if (!root.unconfirmed("selected_zone", zone)) root.uiZone = zone
     // Only follow the reported profile when the user has not picked something
     // else, and fall back to the first available so Load is never a no-op.
     var reported = root.currentProfile !== "" ? root.currentProfile
@@ -233,10 +311,19 @@ Panel {
         || root.profileNames.indexOf(root.uiProfile) < 0) {
       root.uiProfile = reported
     }
-    if (s.brightness !== undefined) root.uiBrightness = s.brightness
-    if (s.intensity !== undefined) root.uiIntensity = s.intensity
-    root.uiColorA = Model.zoneHex(s, root.uiZone)
-    root.uiColorB = s.secondary ? String(s.secondary) : ""
+    // Same rule as the toggles: a value the user has set is not reconciled
+    // until the backend agrees with it. Without this a reply that is perfectly
+    // current - but taken before a slow command landed - drags the slider back
+    // to where it was, which is the snap-back when clicking along a slider.
+    if (s.brightness !== undefined && !root.unconfirmed("brightness", s.brightness))
+      root.uiBrightness = s.brightness
+    if (s.intensity !== undefined && !root.unconfirmed("intensity", s.intensity))
+      root.uiIntensity = s.intensity
+
+    var colorA = Model.zoneHex(s, root.uiZone)
+    var colorB = s.secondary ? String(s.secondary) : ""
+    if (!root.unconfirmed("color", colorA)) root.uiColorA = colorA
+    if (!root.unconfirmed("secondary", colorB)) root.uiColorB = colorB
     loadPickerFromTarget()
   }
 
@@ -322,8 +409,12 @@ Panel {
     }
     // An intermediate frame may be dropped if the hardware is busy; the value
     // the user settles on may not, or saved state ends up behind the UI.
-    if (live) args.push("--drop-if-busy")
-    root.run(args)
+    if (live) {
+      args.push("--drop-if-busy")
+      root.run(args)
+    } else {
+      root.intend(root.pickTarget === "b" ? "secondary" : "color", hex, args)
+    }
   }
 
   function setIntensity(value, live) {
@@ -331,16 +422,28 @@ Panel {
     var args = ["set", "--intensity", String(root.uiIntensity), "--fast"]
     // An intermediate frame may be dropped; the value the user settles on may
     // not, or saved state ends up behind the UI.
-    if (live) args.push("--drop-if-busy")
-    root.run(args)
+    if (live) {
+      args.push("--drop-if-busy")
+      root.run(args)
+    } else {
+      root.intend("intensity", root.uiIntensity, args)
+    }
   }
 
+  // `live` marks an intermediate frame. Those are deliberately droppable - the
+  // next one supersedes them - so only the value the user *settles* on is
+  // registered as an unconfirmed choice. Demanding confirmation of every frame
+  // of a drag would queue retries for values the user has already moved past.
   function setBrightness(value, live) {
     root.uiBrightness = Model.clamp255(value)
     var args = ["set", "--zones", live ? colorTargets(true) : "all",
                 "--brightness", String(root.uiBrightness), "--fast"]
-    if (live) args.push("--drop-if-busy")
-    root.run(args)
+    if (live) {
+      args.push("--drop-if-busy")
+      root.run(args)
+    } else {
+      root.intend("brightness", root.uiBrightness, args)
+    }
   }
 
   // Once the user has stopped, re-apply durably so the power button's colour
@@ -371,7 +474,7 @@ Panel {
     if (name !== "gradient") root.uiThemesync = false
     root.cursorIndex = Math.max(0, Model.EFFECT_ORDER.indexOf(name))
     root.touch()
-    root.run(["set", "--effect", name, "--fast"])
+    root.intend("effect", name, ["set", "--effect", name, "--fast"])
   }
 
   function zoneDotColor(zone) {
@@ -505,6 +608,10 @@ Panel {
       if (root.loaded) root.commitDurable()
     }
     if (opened) {
+      // A choice left unconfirmed from a previous session is not worth
+      // re-asserting into a panel the user has just reopened.
+      root.pending = ({})
+      root.readSeq = -1
       // Re-resolve on open: setup may have completed since the last look.
       resolveCli()
       cursorActive = false
@@ -733,8 +840,12 @@ Panel {
           onClicked: {
             root.uiThemesync = !root.uiThemesync
             if (root.uiThemesync) root.uiEffect = "gradient"
-            root.touch()
-            root.run(["themesync", root.uiThemesync ? "on" : "off"])
+            // --fast: the settle commit does the durable write, so a click
+            // should not pay the power button's ~2s NVRAM walk. Without it the
+            // toggle held the hardware lock for seconds, which is what gave a
+            // concurrent commit time to clobber it.
+            root.intend("themesync", root.uiThemesync,
+                        ["themesync", root.uiThemesync ? "on" : "off", "--fast"])
           }
         }
 
@@ -860,8 +971,8 @@ Panel {
           fontFamily: root.fontFamily
           onClicked: {
             root.uiZonesync = !root.uiZonesync
-            root.touch()
-            root.run(["zonesync", root.uiZonesync ? "on" : "off"])
+            root.intend("zonesync", root.uiZonesync,
+                        ["zonesync", root.uiZonesync ? "on" : "off", "--fast"])
           }
         }
 
@@ -886,7 +997,8 @@ Panel {
               root.uiZone = value
               root.loadPickerFromZone(value)
               root.touch()
-              root.run(["set", "--select", value, "--fast"])
+              root.intend("selected_zone", value,
+                          ["set", "--select", value, "--fast"])
             }
           }
         }

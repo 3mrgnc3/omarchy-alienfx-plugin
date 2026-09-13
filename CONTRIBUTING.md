@@ -7,14 +7,14 @@ Everything else about this plugin is model-independent. The lighting protocol is
 the same across Alienware machines, the controllers are found by their USB
 vendor and the shape of the HID reports they declare, and the colour work has no
 idea what model it is running on. The one thing that genuinely differs from
-machine to machine is which LED belongs to which key — and that is the one thing
+machine to machine is which LED belongs to which key, and that is the one thing
 that cannot be worked out from a distance.
 
 ## Why the keymap can't just be guessed
 
 It would be nice if LED numbers followed the keyboard. They don't. On the one
-machine this was developed on, the rows start at 0, 20, 40, 61, 81 and 100 —
-nearly regular — but inside each row the numbers skip. `backspace` is 34 where
+machine this was developed on, the rows start at 0, 20, 40, 61, 81 and 100,
+nearly regular, but inside each row the numbers skip. `backspace` is 34 where
 the pattern says 33, every key on the third row is one higher than expected, the
 left arrow is 133 where a formula predicts 113, and the four media keys sit off
 on their own at 156–159.
@@ -46,7 +46,7 @@ elc     : /dev/hidraw0 (187c:0551) writable
 kbd     : /dev/hidraw2 (0d62:d2b1) writable
 ```
 
-If either says `NOT FOUND`, that is itself worth reporting — send the full
+If either says `NOT FOUND`, that is itself worth reporting. Send the full
 output of `alienfx-ctl devices`, which lists every HID device with its report
 shape. That is exactly what is needed to work out whether your machine speaks a
 variant not yet recognised.
@@ -67,17 +67,17 @@ Choose **Create New KeyMap**.
 ### 3. Pick the closest keyboard shape
 
 The wizard asks one question: does your keyboard have a numeric keypad? Answer
-it and carry on. It does not have to be an exact match — keys you don't have are
+it and carry on. It does not have to be an exact match, keys you don't have are
 skipped in a moment, and the shape only decides which keys you get asked about.
 
 The keypad is asked about separately because it is the one thing skipping cannot
 fix: you can skip a key you don't have, but you cannot conjure one the shape is
 missing. If your keyboard has some other block of keys nothing asks you about,
-say so in an issue with a photo — adding one is a few lines of data.
+say so in an issue with a photo. Adding one is a few lines of data.
 
 ### 4. Probe the chassis zones
 
-Say yes. The wizard lights one chassis light at a time and asks what came on —
+Say yes. The wizard lights one chassis light at a time and asks what came on:
 the touchpad ring, the lid logo, the power button, or whatever your model has.
 Type a name of your own for anything unfamiliar; Tron strips and second lid
 lights are supported, and the order you name them in is the order the gradient
@@ -96,7 +96,7 @@ guess in **red**. Move the light onto the right key, press Enter, and it turns
 | ← → | move the light one LED |
 | PgUp / PgDn | move it ten |
 | ↑ ↓ | choose a different key to map |
-| Enter | that's the one — save it |
+| Enter | that's the one, save it |
 | `s` | skip: this machine has no such key |
 | `u` | unassign the key shown |
 | `1`–`9` | jump to the start of a row |
@@ -121,7 +121,7 @@ alienfx-ctl theme apply --force  # look at the keyboard
 
 A good result is a smooth diagonal blend with no dead keys and no key stuck on
 a colour of its own. `keymap gaps` flags unnamed LEDs that sit next to named
-ones — those are usually a wide key covering two LEDs, where naming the second
+ones. Those are usually a wide key covering two LEDs, where naming the second
 one fixes a key that looked half-lit.
 
 Your keymap is now at:
@@ -135,13 +135,13 @@ Your keymap is now at:
 Many older Alienware models light the keyboard as four zones rather than per
 key, and have no per-key controller at all. The wizard notices, skips the key
 mapping, and offers to save a zone-only keymap after the chassis probe. Those
-machines get a theme gradient across their four keyboard zones — there is
+machines get a theme gradient across their four keyboard zones. There is
 nothing else to do, and no keys to map.
 
 ## Submitting your keymap
 
 **Send it as a pull request containing one new file.** Nothing else needs to
-change — no code, no registration, no edit to any list.
+change: no code, no registration, no edit to any list.
 
 The wizard already wrote the file under exactly the right name, so copy it
 across without renaming it:
@@ -160,7 +160,7 @@ cli/src/alienfx_ctl/data/alienware-<model>-keymap.json
 for example `alienware-m15-r3-keymap.json` or `alienware-x17-r2-keymap.json`.
 The name is how the plugin finds it: an owner of that model gets your keymap
 automatically, ahead of the reference map, while anyone who has probed their own
-machine keeps theirs. **Keep the filename the wizard produced** — it is derived
+machine keeps theirs. **Keep the filename the wizard produced.** It is derived
 from what the firmware reports about the machine, so a hand-edited name will
 simply never match.
 
@@ -168,11 +168,11 @@ simply never match.
 
 One file, and in the description:
 
-1. **Your exact model** — `cat /sys/class/dmi/id/product_name`.
+1. **Your exact model**, from `cat /sys/class/dmi/id/product_name`.
 2. **The output of `alienfx-ctl devices`.**
 3. **What actually works.** Does the gradient run corner to corner? Are all the
    keys lit? Do the chassis zones light the things they claim to? Say what is
-   wrong as well as what is right — a keymap covering 80 of 90 keys is still
+   wrong as well as what is right. A keymap covering 80 of 90 keys is still
    worth having, and being straight about the gaps saves the next owner of that
    machine repeating your work.
 
@@ -194,7 +194,7 @@ cd cli && python3 -m pytest tests -q
 
 Run it before opening the pull request. It needs no hardware and no network.
 
-Beyond that, review is mostly taking your word for it — nobody here has your
+Beyond that, review is mostly taking your word for it, nobody here has your
 laptop. That is exactly why the honest account of what works matters more than a
 tidy diff.
 
@@ -204,7 +204,7 @@ tidy diff.
 and `alienfx-ctl keymap show` attached, plus which theme you were on if it looks
 like a colour problem.
 
-**Keyboard shapes** for layouts not covered — see step 3.
+**Keyboard shapes** for layouts not covered, see step 3.
 
 **Code**: run the tests before and after.
 
@@ -213,7 +213,7 @@ cd cli && python3 -m pytest tests -q
 ```
 
 They are local only. There is no CI, no GitHub Actions, and no remote runner,
-and none is wanted. Everything runs offline and nothing needs hardware — the
+and none is wanted. Everything runs offline and nothing needs hardware. The
 protocol tests capture the bytes that would have reached the device and assert
 on them.
 
@@ -227,7 +227,7 @@ Two rules worth stating plainly:
 - **Never ship an LED index nobody has verified on the hardware it describes.**
   See the top of this file.
 - **Never take light numbers from other tooling.** The number stored here is not
-  the number that goes on the wire — this code sends `index + 1` — and half the
+  the number that goes on the wire, this code sends `index + 1`, and half the
   fields in a keymap here exist to serve this renderer and have no equivalent
   anywhere else. The two cannot be lined up without the hardware in front of
   you, and at that point the wizard has already answered the question properly.

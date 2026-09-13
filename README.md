@@ -1,76 +1,57 @@
 # omarchy-alienfx-plugin
 
-RGB zone control for Alienware laptops, as a native [Omarchy](https://omarchy.org/) 4.0+
-Quickshell plugin.
+RGB lighting control for Alienware laptops, as a native [Omarchy](https://omarchy.org/)
+4.0+ Quickshell plugin.
 
-An alien head sits on the bar. Click it and you get a popup that looks like every other
-Omarchy widget, because it is built from Omarchy's own components and reads the active
-theme at runtime. By default it blends a diagonal gradient from your current theme's
-palette across all four lighting zones, and repaints itself whenever you switch themes.
+An alien head sits on the bar. Click it for a popup built from Omarchy's own components,
+so it follows your theme. By default it blends a diagonal gradient from the active theme's
+palette across the keyboard and the chassis zones, and repaints when you switch themes.
 
 Runs unprivileged. No `sudo`, no root daemon.
 
-## Which laptops it works on
+## Which laptops
 
-**Fully tested on one machine: an Alienware m16 R2.** Everything else is
-work in progress, and help is genuinely wanted.
+Tested on one machine, an Alienware m16 R2. Everything else is work in progress and help
+is welcome.
 
-The parts that are the same on every Alienware are already model-independent.
-The lighting protocol doesn't vary. The controllers are found by their USB
-vendor and the shape of the HID reports they declare, not by a hard-coded
-product id, so a different model's controller should still be recognised.
-Chassis zones — touchpad ring, lid logo, power button, Tron strips, anything
-else — come from a per-model file rather than the code, and laptops that light
-the keyboard as four zones instead of per key are supported too.
+Most of the plugin is already model independent. The lighting protocol is the same across
+Alienware machines, controllers are found by USB vendor and HID report shape rather than a
+hard-coded product id, chassis zones come from a per-model file, and laptops that light the
+keyboard as four zones instead of per key are supported.
 
-The one thing that genuinely differs between machines is **which LED belongs to
-which key**, and that cannot be worked out remotely. LED numbering follows the
-circuit board, not the keyboard: on the tested machine `backspace` is 34 where
-the obvious pattern says 33, and the left arrow is 133 where a formula predicts
-113. So this plugin ships no LED numbers that anybody guessed — a wrong number
-silently lights the wrong key, which is worse than shipping none.
+What differs between machines is which LED belongs to which key, and that can't be worked
+out remotely. LED numbering follows the circuit board, not the keyboard: on the tested
+machine `backspace` is 34 where the obvious pattern says 33, and the left arrow is 133
+where a formula predicts 113. So no LED numbers here are guessed. A wrong one silently
+lights the wrong key, which is worse than shipping none.
 
-Instead there's a **guided wizard**. It lights one LED at a time and you walk it
-onto the right key with the arrow keys; it guesses the next one for you, and
-learns from your corrections. Ten minutes, and your machine is mapped.
+Instead there's a wizard. It lights one LED at a time and you walk it onto the right key
+with the arrow keys, guessing the next one and learning from your corrections. Ten minutes
+and your machine is mapped.
 
-**If you own a different AlienFX laptop, please send the keymap back.** Adding a
-model is a data change with no code behind it: drop the file in and every owner
-of that machine gets it automatically. [CONTRIBUTING.md](CONTRIBUTING.md) walks
-through generating one; submitting it is a pull request adding a single file to
-`cli/src/alienfx_ctl/data/`. Bug reports from unfamiliar hardware are just as
-welcome — `alienfx-ctl devices` prints everything needed to
-diagnose a machine I can't see.
+If you own a different AlienFX laptop, please send the keymap back. Adding a model is a
+data change with no code behind it. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## What it controls
 
-| Zone | Controller | Addressing |
-|---|---|---|
-| Keyboard | Darfon `0d62:d2b1`, APIv5 | per key |
-| Touchpad halo | AW-ELC `187c:0551`, APIv4 | one colour |
-| Lid logo | AW-ELC `187c:0551`, APIv4 | one colour |
-| Power button | AW-ELC `187c:0551`, APIv4 | one colour, via NVRAM power states |
-
-Developed and verified on an **Alienware m16 R2**, BIOS 1.19.0, Omarchy 4.0.2.
+| Zone | Hardware |
+|---|---|
+| Keyboard | per-key RGB, 85 keys on the reference machine |
+| Touchpad | the halo around it |
+| Lid logo | the alien head |
+| Power button | the alien head on the button |
 
 ## Install
 
-Two ways, both supported.
-
-### From GitHub, the Omarchy way
+### From GitHub
 
 ```bash
 omarchy plugin add https://github.com/3mrgnc3/omarchy-alienfx-plugin.git --enable
 ```
 
-That clones the repo into `~/.config/omarchy/plugins/3mrgnc3.alienfx/` and puts the
-alien head on the bar. Click it and the popup will offer **Complete setup**, because
-`omarchy plugin add` installs only the QML — the udev rule that makes the hardware
-reachable without `sudo`, the CLI that drives it, and the systemd unit that restores
-your lighting at login all live outside the plugin folder.
-
-**Complete setup** opens a terminal and runs the installer bundled in the clone. It
-checks dependencies first, tells you what is missing, and asks before changing
+This installs only the QML, so the popup will offer **Complete setup** on first click. The
+udev rule, the CLI and the systemd units live outside the plugin folder. Complete setup
+opens a terminal, checks dependencies, tells you what's missing and asks before changing
 anything. The udev step needs your password once.
 
 ### From a clone
@@ -81,135 +62,89 @@ cd omarchy-alienfx-plugin
 ./install.sh
 ```
 
-`--yes` installs missing dependencies without asking; `--no-deps` reports them and
-carries on regardless. Either way the installer is idempotent — re-run it to upgrade
-in place.
+`--yes` installs missing dependencies without asking, `--no-deps` reports them and carries
+on. The installer is idempotent, so re-run it to upgrade in place.
 
 It sets up:
 
-- `~/.local/bin/alienfx-ctl` plus its package in `~/.local/share/omarchy-alienfx-plugin/`
-- `/etc/udev/rules.d/60-omarchy-alienfx.rules` (the one step needing root)
+- `~/.local/bin/alienfx-ctl` and its package in `~/.local/share/omarchy-alienfx-plugin/`
+- `/etc/udev/rules.d/60-omarchy-alienfx.rules`, the one step needing root
 - the plugin in `~/.config/omarchy/plugins/3mrgnc3.alienfx/`, enabled on the bar
-- a `theme-set` hook drop-in, so theme switches repaint the lights
-- systemd `--user` units that restore your lighting at login and after suspend
+- a `theme-set` hook, so theme switches repaint the lights
+- systemd user units that restore lighting at login and after suspend
 
 ### Dependencies
 
-The installer checks these and separates the ones it cannot work without from the ones
-that merely degrade something:
+| | Package | Why |
+|---|---|---|
+| Required | `python` | 3.11+, `tomllib` reads theme palettes |
+| Recommended | `ttf-jetbrains-mono-nerd` | or the alien head renders as a blank box |
+| Recommended | `alacritty` | a terminal for the KeyMap Wizard |
+| Optional | `gum` | nicer installer prompts |
 
-| Needed for | Package |
-|---|---|
-| **Required** — Omarchy itself, systemd, Python 3.11+ (`tomllib` reads theme palettes), and `sudo` or `pkexec` for the udev step | `python` |
-| Recommended — a Nerd Font, or the alien head renders as a blank box | `ttf-jetbrains-mono-nerd` |
-| Recommended — a terminal, for the KeyMap Wizard | `alacritty` |
-| Optional — `gum`, only to make the installer's prompts nicer | `gum` |
-
+Omarchy itself, systemd, and `sudo` or `pkexec` for the udev step are also required.
 Missing packages are installed with `omarchy pkg add`, falling back to `pacman`.
 
 ### Uninstall
 
 ```bash
-./uninstall.sh            # keeps your profiles and keymap
-./uninstall.sh --purge    # removes those too
+./uninstall.sh
+omarchy plugin remove 3mrgnc3.alienfx
 ```
 
-Run this **before** `omarchy plugin remove 3mrgnc3.alienfx`. That command deletes the
-plugin folder, which is all Omarchy knows about — the CLI, the udev rule and the
-systemd units live outside it and would be left behind. `uninstall.sh` removes the
-folder for you via `omarchy plugin remove` anyway, unless it is running from inside
-it, in which case it tells you to finish with that command.
-
-Removing the udev rule does not revoke an ACL that is already applied; the device
-nodes lose it at the next reboot or replug.
+Run `uninstall.sh` first. `omarchy plugin remove` deletes the plugin folder, which is all
+Omarchy knows about, and the script lives in it.
 
 ## The popup
 
-- **Complete setup** — appears only when the plugin can see that setup is unfinished:
-  either there is no CLI at all, or there is one but the device nodes are not writable
-  because the udev rule was never installed. Both leave the lights dead and look
-  identical from the outside, so both offer the same fix.
-- **KeyMap Wizard** — a small keyboard icon sits top-right, inline with the title, and is
-  always available: re-running the wizard is how you repair or replace a keymap. A larger
-  labelled button also appears while no keymap is installed for this machine, and self-hides
-  once one is. Either opens a terminal with a menu: **1. Load Existing KeyMap File**,
-  **2. Create New KeyMap**.
-- **ThemeSync** *(on by default)* — derives a diagonal gradient from the active theme and
-  drives every zone from it. While on, the only other control is brightness, because
-  anything else you set would just be overwritten on the next theme switch.
-- **ZoneSync** — move all zones together, or turn it off to reveal the zone selector.
-- **Zone** — Keyboard / PowerButton / Touchpad / Logo.
-- **Colour range** — two swatches on one row, **FROM** and **TO**, being the two ends of
-  the gradient. Click either to point the R/G/B sliders at it; changes land on the hardware
-  in realtime and autosave as you go. Until you set the far end it shows greyed-out,
-  previewing the complement that would be derived. Choosing **Solid** hides the far end
-  entirely, since a flat colour has no second end.
-- Picking a colour for a single zone switches the effect to Solid, because Gradient derives
-  every zone from its two anchors and would compute a per-zone pick away.
-- **Effect** — Gradient (default), Wave, Pulse, Nightrider, Solid. **Wave, Pulse and
-  Nightrider animate between both ends of the range** when you have set a far colour, and
-  stay single-colour when you have not. The chassis samples the same range so the whole
-  machine reads as one blend.
-- **Profile** — Load and Save. Saving over the loaded name overwrites it; typing a new
-  name creates a new profile. A loaded profile persists across reboots.
+- **ThemeSync** on by default. Blends the active theme across every zone and repaints on
+  theme change.
+- **Brightness** and **Intensity** sliders.
+- **ZoneSync** to drive all zones together, or off to set each one separately.
+- **Colour pickers**, two of them, for the ends of a gradient range.
+- **Effects**: Gradient, Wave, Pulse, Nightrider, Solid.
+- **Profiles**: save and reload a whole setup by name.
+- **KeyMap Wizard**, reachable from the keyboard icon at any time.
 
 ## The gradient
 
 Only the keyboard is addressable per key, so it carries the real gradient. Each key's row
-and column are normalised against the keymap extent and averaged for the `tl-br` diagonal
-(`t = (row_t + col_t) / 2`).
+and column are normalised against the keymap and averaged for a top-left to bottom-right
+diagonal.
 
-**The blend holds near each anchor and crosses over quickly through the middle.** An
-evenly-spaced blend looked wrong, and not because of the colour maths: key density along
-the diagonal peaks in the middle — 43 of 85 keys sit between `t=0.4` and `t=0.6`, and three
-keys sit at the two extremes — so an even ramp spends most of its *surface* on the
-intermediate hues. Measured before easing, 73 of 85 keys were mid-blend and each chosen
-colour showed on about six. An S-curve on the blend position takes that to 30 / 35 / 20.
+Two things are less obvious. The blend holds near each anchor colour and crosses over
+quickly through the middle, because key density along the diagonal peaks in the centre:
+43 of 85 keys sit in the middle fifth of the range, so an even ramp spends most of its
+surface on the intermediate hues. And interpolation runs through gamut-mapped OkLCh rather
+than a straight line, which keeps chroma up instead of fading through grey.
 
-**Interpolation is gamut-mapped OkLCh**, holding chroma and rotating hue the short way
-round. A straight line through Oklab's `a`/`b` passes close to neutral between two
-well-separated hues, so the keyboard averaged only 47% of the saturation its anchors were
-set to and no amount of saturating them could lift it. Holding chroma removes that ceiling
-(47% → 94%), at the cost of travelling *through* the intervening hues rather than
-desaturating past them: red to teal goes by way of orange and yellow, not by way of grey.
-Chroma is fitted to the sRGB gamut per key — clipping channels instead is what made an
-earlier attempt come out olive. Endpoints are returned byte-exactly, so the corner keys are
-always the colours you chose.
+The chassis zones take the exact colour of the corner key beside them. The touchpad matches
+`esc`, the power button matches the bottom-right key.
 
-The chassis zones take the **exact colour of the corner key** they sit beside rather than a
-fixed point on the axis: the touchpad matches `esc`, the power button matches the
-bottom-right key. Sampling `t=1.0` is not good enough — the right arrow sits at `t=0.969`,
-because the media keys reach a wider column.
+Anchors come from the theme's `colors.toml`: the accent at one end, its most hue-distant
+saturated colour at the other. A near-monochrome theme gets a synthesised complement rather
+than a flat fill.
 
-Anchors come from the theme's `colors.toml`. The near end is the theme's `accent`; the far
-end is its most hue-distant saturated colour, so the blend reads as a real gradient on any
-palette. A near-monochrome theme has no distant hue to offer, so a complement is
-synthesised rather than collapsing to a flat fill.
+`docs/dead-ends.md` has the measurements and the things that didn't work.
 
 ### Intensity
 
 Keycaps sit behind a diffuser that mixes white into everything, so a colour that looks
-right on screen reads washed out on the keys. **Intensity** is an absolute saturation
-target and the only saturation control — it replaced a multiplier, a floor and a relative
-trim that overlapped and fought each other:
+right on screen reads washed out on the keys. Intensity is an absolute saturation target
+and the only saturation control.
 
-| slider | saturation | keyboard delivers |
-|---|---|---|
-| −10 | 0.40 | 0.41 — muted |
-| 0 | 0.85 | 0.86 — the default, calibrated by eye on hardware |
-| +10 | 1.00 | 0.94 — as vivid as sRGB allows |
+| Slider | Saturation |
+|---|---|
+| -10 | 0.40, muted |
+| 0 | 0.85, the default |
+| +10 | 1.00 |
 
-Two straight segments meeting at the centre, so each half is evenly spaced. It applies in
-every mode, because it lands in the one shaping funnel. `alienfx-ctl set --intensity N`.
-
-It is applied to the **two anchor colours**, never to each interpolated key. Doing the
-latter collapsed the blend into three flat bands, because the trim clamps and clamping
-every key erases the saturation ramp a blend is made of.
+It applies in every mode. `alienfx-ctl set --intensity N`.
 
 ## CLI
 
-Everything the popup does is available by hand, which makes the whole thing debuggable
-without the shell running.
+Everything the popup does is available by hand, which makes it debuggable without the
+shell running.
 
 ```bash
 alienfx-ctl devices                    # what was found, and is it writable?
@@ -221,7 +156,7 @@ alienfx-ctl solid --color '255,120,0' --zones kbd,logo
 alienfx-ctl off --zones all
 alienfx-ctl effect nightrider --color red --speed slow
 
-alienfx-ctl theme show                 # the anchors derived from the active theme
+alienfx-ctl theme show                 # anchors derived from the active theme
 alienfx-ctl theme apply                # paint the theme gradient now
 alienfx-ctl themesync on|off|status
 alienfx-ctl zonesync on|off
@@ -233,181 +168,90 @@ alienfx-ctl restore                    # what the systemd unit runs
 alienfx-ctl set --color 00ff88 --zones logo --dry-run -v   # show, write nothing
 ```
 
-Colours accept `RRGGBB`, `#RRGGBB`, `r,g,b`, a name (`orange`, `cyan`, …) or `@themekey`
-to pull straight from the active palette. Brightness accepts `0-255` or `10%`.
-
-Add `--persist` to also write chassis colours into NVRAM so they survive a cold boot.
+Colours accept `RRGGBB`, `#RRGGBB`, `r,g,b`, a name, or `@themekey` to pull from the active
+palette. Brightness accepts `0-255` or `10%`. Add `--persist` to write chassis colours into
+NVRAM so they survive a cold boot.
 
 ## Why no `sudo`
 
-A udev rule tags both controllers with `uaccess`, which makes systemd put an ACL on the
-device nodes for whoever is logged into the local seat.
+The udev rule tags both HID nodes with `uaccess`, so logind grants the seat owner an ACL on
+login. The CLI opens them as you.
 
-**The `60-` prefix on that rule is load-bearing.** The ACL is applied by the `uaccess`
-builtin invoked from `/usr/lib/udev/rules.d/73-seat-late.rules`, which only sees tags
-already set when it runs. A rule numbered above 73 adds the tag too late, the builtin
-never fires, and the keyboard node stays root-only — which looks exactly like a
-boot-time race and is not one. The previous generation of this tool shipped its rule as
-`99-` and worked around the symptom with a retrigger service and a `sleep`.
+The rule is numbered `60-` on purpose. `uaccess` is applied by a builtin that runs from
+`73-seat-late.rules`, so a rule numbered above that is read too late and the tag is never
+seen. An earlier version of this project spent a long time chasing what looked like a
+boot-time race and was only ever a filename.
 
-Verify with `ls -la /dev/hidraw*` — a trailing `+` on the permissions means the ACL is
-there.
+Nodes are resolved at runtime by vendor id and HID report shape, never by a fixed
+`/dev/hidrawN`. On this laptop `hidraw0` is sometimes a security key.
 
-## Device detection
+## Other machines
 
-Controllers are found by **USB vendor id plus HID report shape**, never by product id.
-Product ids differ across models — the chassis answers on `0x0550` as well as `0x0551`,
-Darfon keyboards on `0xcabc` and `0xdabc` as well as `0xd2b1` — so pinning one made the
-tool work on exactly one laptop. Vendor ids do not differ, and the protocol declares its
-own generation in its report descriptor:
+The machine identifies itself from DMI and its keymap is stored per model, so a config
+directory can move between machines without them fighting over one file.
 
-| controller | vendor | signature | API |
-|---|---|---|---|
-| chassis | `0x187c` Alienware | output report `0x00`, 34 bytes | v4 |
-| keyboard | `0x0d62` Darfon | feature report `0xcc`, 64 bytes | v5 |
-
-Both halves are required. Vendor alone is too loose — Alienware and Dell ship several HID
-devices, and this laptop carries two unrelated Dell nodes. Of the ten HID devices present,
-only the two real controllers match. `verify_node` re-checks both immediately before the
-first write, because `/dev/hidraw0` here is sometimes a security key and the older
-tooling's hard-coded `hidraw0`/`hidraw1` would have aimed chassis packets at it.
-
-`alienfx-ctl devices` prints every node with its report shape, which is what explains why
-a node was or was not chosen on an unfamiliar machine. `ALIENFX_ELC_DEV` /
-`ALIENFX_KBD_DEV` pin a node by hand; an override still has to pass the same check.
-
-## Other machines, in detail
-
-See [Which laptops it works on](#which-laptops-it-works-on) for the short
-version and [CONTRIBUTING.md](CONTRIBUTING.md) for how to add yours. This
-section is the mechanism.
-
-Nothing is hard-coded to one model. The machine identifies itself from DMI
-(`Alienware m16 R2`, sku, BIOS) and its keymap is stored per model as
-`~/.config/omarchy-alienfx-plugin/keymap/alienware-<model>-keymap.json`, so a config
-directory can move between machines without them fighting over one file. A plain
-`keymap.json` is still honoured for installs that predate this.
-
-A keymap contributed for your exact model, bundled in `cli/src/alienfx_ctl/data/`
-under the same name, is used ahead of the reference map — so adding support for a
-machine is a data change with no code behind it. Your own probed keymap always
-wins over a bundled one.
-
-**Zones come from the keymap**, not from a constant:
+Zones come from the keymap rather than a constant:
 
 ```json
 "zones": { "tpd": [0], "logo": [2], "pbtn": [4] }
 ```
 
-Any names work. A model with Tron strips or a second lid light is driven by shipping a
-keymap that lists them — no code change — and where the names are unfamiliar the gradient
-spreads them evenly along the blend axis rather than using the reference anchors. The order
-they are listed in is the order the gradient travels through them.
+Any names work, and the order they're listed in is the order the gradient travels through
+them. A keyboard lit as four zones rather than per key declares `"keyboard": "zones"` and
+lists them the same way.
 
-**Keyboards lit as four zones** — most older Alienware laptops, which have no per-key
-controller at all — are not a special case. Such a machine is simply one with more chassis
-zones and no keyboard:
+A keymap contributed for your model, bundled in `cli/src/alienfx_ctl/data/`, is used ahead
+of the reference one. Your own probed keymap always wins over a bundled one.
 
-```json
-"keyboard": "zones",
-"zones": { "kb1": [2], "kb2": [3], "kb3": [4], "kb4": [5], "logo": [1], "pbtn": [0] }
-```
-
-It gets a theme gradient across the four keyboard zones from that data alone. An absent
-`keyboard` field means per-key.
-
-**Create New KeyMap** offers to probe the chassis zones, lighting each candidate id in turn
-and asking what came on, and it will save a zone-only keymap on a machine with no per-key
-controller.
-
-### The keyboard shape
-
-The wizard needs the shape of your keyboard before it can ask which LED belongs
-to which key. The shape comes from the shipped keymap at runtime — not stored a
-second time as data — and the wizard offers one optional extension, a numeric
-keypad, in `data/layout-extensions.json`.
-
-A close match is enough: keys your machine lacks are skipped with a keypress as
-you go. The keypad is offered separately because that is the one case skipping
-cannot solve — **you can skip a key you do not have, but you cannot conjure one
-the shape is missing.**
-
-No bundled shape carries an LED index, and that is deliberate. Indices are
-irregular on real hardware: on the tested machine row bases are near-multiples
-of 20 (0, 20, 40, 61, 81, 100) but within rows they skip — `backspace` is 34
-where the pattern says 33, the left arrow is 133 where a formula predicts 113,
-and the media keys sit alone at 156–159. That is PCB routing, not logic, and a
-formula fitting 34 of 85 keys is not a rule. Every tool in this space probes for
-them instead, and so does this one. A wrong shape is visible and skippable; a
-wrong index silently lights the wrong key.
-
-`alienfx-ctl keymap gaps` reports LED indices the keymap does not name and flags the ones
-adjacent to a named key — reach for it first if a single key ever behaves oddly.
+`alienfx-ctl keymap gaps` reports LED indices the keymap doesn't name and flags those next
+to a named key. Reach for it first if a single key behaves oddly.
 
 ## Known limits
 
-- **The power button takes the slow path.** Ordinary colour commands are overridden by
-  the firmware's own power-state handler, so a colour only sticks by programming six
-  NVRAM state blocks. That is done, and the zone shows your colour on AC and on
-  battery, breathes it while charging, and fades it out going to sleep — while still
-  warning in red when the battery is critical, which is the one bit of firmware
-  behaviour worth keeping. It costs ~2.3s, so it is skipped during a live colour drag
-  and whenever the colour already in NVRAM matches.
-- **Chassis zones cannot animate.** They are single-LED zones; Wave, Pulse and
-  Nightrider are keyboard effects, and the chassis holds the base colour.
-- **Brightness is colour.** Neither controller exposes a brightness field on the paths
-  used here, so brightness scales the RGB channels. At 10% a saturated colour is a dim
-  ember, which is the intent.
-- Effects that do **not** render usefully on the reference BIOS — hardware pulse, dual
-  wave, laser — are deliberately not offered rather than exposed and broken.
+- **The power button takes the slow path.** Ordinary colour commands are overridden by the
+  firmware's power-state handler, so a colour only sticks by programming six NVRAM blocks.
+  That's done, and the zone shows your colour on AC and battery, breathes while charging
+  and fades going to sleep, while still warning in red when the battery is critical. It
+  costs about 2.3s, so it's skipped during a live drag and when NVRAM already matches.
+- **Chassis zones can't animate.** They're single-LED zones. Wave, Pulse and Nightrider are
+  keyboard effects and the chassis holds the base colour.
+- **Brightness is colour.** Neither controller exposes a brightness field on these paths, so
+  brightness scales the RGB channels. At 10% a saturated colour is a dim ember.
+- Effects that don't render usefully on the reference BIOS, such as hardware pulse, dual
+  wave and laser, aren't offered rather than exposed and broken.
 
 ## Layout
 
 ```
 manifest.json  Panel.qml  Model.js     the Quickshell plugin
-cli/src/alienfx_ctl/                   the CLI: device, apiv4, apiv5, gradient, palette, …
-cli/src/alienfx_ctl/data/              the reference keymap and the bundled shapes
-cli/tests/                             544 tests, no hardware required
+cli/src/alienfx_ctl/                   the CLI
+cli/src/alienfx_ctl/data/              reference keymap and keyboard shapes
+cli/tests/                             551 tests, no hardware required
 share/udev/                            the uaccess rule
-share/systemd/                         restore + resume units
+share/systemd/                         restore and resume units
 share/omarchy/hooks/theme-set.d/       the theme-switch hook
 share/bin/                             the wizard's terminal launcher
-docs/dead-ends.md                      things that do not work, and why
+docs/dead-ends.md                      what doesn't work, and why
 ```
 
-`docs/dead-ends.md` is worth reading before changing the hardware layer. It records
-hard-won failures, including two that will brick the keyboard until reboot.
+Read `docs/dead-ends.md` before changing the hardware layer. It records failures that cost
+real time, including two that brick the keyboard until you reboot.
 
-Earlier generations of this tool are kept on the `archive-reference` branch rather than on
-`main`: they were 15M of the repo, every user installing the plugin would have cloned
-them, and they contain runnable scripts that hit the hardware directly — including the two
-failure modes above. Fetch them with
-`git checkout archive-reference -- archive/` when you need to look something up.
+Earlier versions of this tool are on the `archive-reference` branch rather than `main`, to
+keep them out of every clone. Fetch with `git checkout archive-reference -- archive/`.
 
 ## Development
 
-Checks run **locally only** — there is no CI, no GitHub Actions, and no remote
-runner. Everything is one command:
+Checks run locally. There's no CI and no GitHub Actions.
 
 ```bash
-cd cli && python3 -m pytest tests -q
+cd cli && python3 -m pytest tests -q     # 551 tests, no hardware needed
 ```
 
-That covers the protocol buffers, the gradient maths, the wizard, and the
-packaging checks that used to be a workflow: the manifest against what Omarchy's
-plugin registry actually enforces, the declared settings against the ones the
-QML reads, the bundled layouts, and the shell scripts parsing. No hardware
-needed for any of it.
-
-```bash
-cd cli && python3 -m pytest tests -q     # 544 tests, no hardware needed
-./cli/bin/alienfx-ctl devices            # run from the checkout, no install
-omarchy plugin validate .                # check the manifest
-```
-
-The CLI is standard-library only and needs Python 3.11+. Saving a file under
-`~/.config/omarchy/plugins/` hot-reloads the plugin; `omarchy restart shell` forces it.
+That covers the protocol buffers, the gradient maths, the wizard, and the packaging checks:
+the manifest against what Omarchy's plugin registry enforces, declared settings against the
+ones the QML reads, the bundled layouts, and the shell scripts parsing.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
