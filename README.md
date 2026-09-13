@@ -324,7 +324,7 @@ adjacent to a named key — reach for it first if a single key ever behaves oddl
 manifest.json  Panel.qml  Model.js     the Quickshell plugin
 cli/src/alienfx_ctl/                   the CLI: device, apiv4, apiv5, gradient, palette, …
 cli/src/alienfx_ctl/data/              the reference keymap and the bundled shapes
-cli/tests/                             488 tests, no hardware required
+cli/tests/                             502 tests, no hardware required
 share/udev/                            the uaccess rule
 share/systemd/                         restore + resume units
 share/omarchy/hooks/theme-set.d/       the theme-switch hook
@@ -343,8 +343,21 @@ failure modes above. Fetch them with
 
 ## Development
 
+Checks run **locally only** — there is no CI, no GitHub Actions, and no remote
+runner. Everything is one command:
+
 ```bash
-cd cli && python3 -m pytest tests -q     # 488 tests, no hardware needed
+cd cli && python3 -m pytest tests -q
+```
+
+That covers the protocol buffers, the gradient maths, the wizard, and the
+packaging checks that used to be a workflow: the manifest against what Omarchy's
+plugin registry actually enforces, the declared settings against the ones the
+QML reads, the bundled layouts, and the shell scripts parsing. No hardware
+needed for any of it.
+
+```bash
+cd cli && python3 -m pytest tests -q     # 502 tests, no hardware needed
 ./cli/bin/alienfx-ctl devices            # run from the checkout, no install
 omarchy plugin validate .                # check the manifest
 ```
