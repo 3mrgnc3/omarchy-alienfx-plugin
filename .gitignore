@@ -5,3 +5,7 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+# Root-owned leftover from an old /etc install; superseded by the
+# archive-reference branch.
+archive/
