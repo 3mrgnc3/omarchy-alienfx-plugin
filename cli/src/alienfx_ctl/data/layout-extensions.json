@@ -1,0 +1,97 @@
+{
+  "_comment": "Optional blocks of keys some keyboards have and the reference machine does not. The base shape is not stored here - it is read from the shipped keymap at runtime, so there is one description of that keyboard rather than two that can drift. Extensions carry no LED indices; those are irregular on real hardware and are probed.",
+  "extensions": {
+    "numpad": {
+      "label": "a numeric keypad on the right",
+      "verified": false,
+      "source": "a standard keypad block, not probed on any machine",
+      "keys": [
+        [
+          "numlock",
+          0,
+          17
+        ],
+        [
+          "kpslash",
+          0,
+          18
+        ],
+        [
+          "kpasterisk",
+          0,
+          19
+        ],
+        [
+          "kpminus",
+          0,
+          20
+        ],
+        [
+          "kp7",
+          1,
+          17
+        ],
+        [
+          "kp8",
+          1,
+          18
+        ],
+        [
+          "kp9",
+          1,
+          19
+        ],
+        [
+          "kp4",
+          2,
+          17
+        ],
+        [
+          "kp5",
+          2,
+          18
+        ],
+        [
+          "kp6",
+          2,
+          19
+        ],
+        [
+          "kpplus",
+          2,
+          20
+        ],
+        [
+          "kp1",
+          3,
+          17
+        ],
+        [
+          "kp2",
+          3,
+          18
+        ],
+        [
+          "kp3",
+          3,
+          19
+        ],
+        [
+          "kp0",
+          4,
+          17
+        ],
+        [
+          "kpdot",
+          4,
+          19
+        ],
+        [
+          "kpenter",
+          4,
+          20
+        ]
+      ]
+    }
+  }
+}

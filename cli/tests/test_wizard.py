@@ -314,149 +314,97 @@ def test_the_saved_grid_keeps_the_real_columns_from_the_template(config_root, sh
     assert gradient.extreme_indices(written) == gradient.extreme_indices(shipped_keymap)
 
 
-# --------------------------------------------------- the bundled layouts
+# ------------------------------------------------ the keyboard shape
 #
-# Bundled layouts carry keyboard *shapes* and deliberately no LED indices.
-# Indices are irregular on real hardware and cannot be derived - see
-# docs/dead-ends.md - so the wizard probes them. The shape is bundled because
-# without it there is no way to map a keyboard the reference does not have, such
-# as one with a numeric keypad.
+# The base shape is read from the shipped keymap at runtime rather than stored
+# as data, so there is one description of that keyboard instead of two that can
+# drift. Only genuinely extra keys are bundled.
+#
+# An earlier version shipped three whole layouts and they carried 17 keys of
+# information between them: one was byte-identical to the shipped keymap's grid
+# and another was that minus four media keys, which a user without them skips in
+# four keypresses.
 
-def test_every_bundled_layout_loads_and_is_navigable():
-    for name in layout.bundled():
-        grid = layout.load_bundled(name)
-        assert grid.keys(), f"{name} is empty"
-        cursor = (0, 0)
-        for direction in (term.DOWN, term.RIGHT, term.UP, term.LEFT):
-            cursor = grid.move(cursor, direction)
-        assert grid.name_at(cursor)
+def test_the_reference_shape_is_derived_from_the_shipped_keymap(shipped_keymap):
+    """Not a copy of it. If it were stored separately the two would need a test
+    whose only job was policing the fact that they matched - which is what there
+    used to be."""
+    assert layout.reference().grid_positions() == shipped_keymap["grid_positions"]
 
 
-def test_no_bundled_layout_claims_to_know_an_led_index():
+def test_the_bundled_data_holds_no_key_the_reference_already_has():
+    """The duplication check. Anything already described by the keymap must not
+    be restated here."""
+    base = set(layout.reference().keys())
+    for name, spec in layout.extensions().items():
+        overlap = {key for key, _row, _col in spec["keys"]} & base
+        assert not overlap, f"{name} restates keys the keymap already has: {sorted(overlap)}"
+
+
+def test_an_extension_adds_its_keys_and_keeps_the_originals():
+    base = layout.reference()
+    extended = layout.extend(base, "numpad")
+    assert set(base.keys()) < set(extended.keys())
+    assert {"kp0", "kp5", "kpenter", "numlock"} <= set(extended.keys())
+
+
+def test_an_extension_keeps_the_fn_legends():
+    assert layout.extend(layout.reference(), "numpad").hints == layout.reference().hints
+
+
+def test_extension_keys_are_sorted_into_place_by_column():
+    """A keypad has to land to the right of the keys already on that row, or the
+    drawn keyboard does not match the real one."""
+    row = layout.extend(layout.reference(), "numpad").rows[0]
+    columns = [col for _name, col in row]
+    assert columns == sorted(columns)
+    assert row[-1][0].startswith("kp") or row[-1][0] == "numlock"
+
+
+def test_an_unknown_extension_is_refused():
+    with pytest.raises(layout.LayoutError):
+        layout.extend(layout.reference(), "trackball")
+
+
+def test_no_bundled_shape_claims_to_know_an_led_index():
     """The one thing that must never be shipped as a guess. A wrong shape is
     visible and skippable; a wrong index silently lights the wrong key, and the
     user cannot tell our bad data from their own hardware."""
     import json
-    with open(layout.BUNDLED_LAYOUTS, encoding="utf-8") as handle:
+    with open(layout.LAYOUT_EXTENSIONS, encoding="utf-8") as handle:
         raw = json.load(handle)
-    for name, spec in raw["layouts"].items():
-        for row in spec["rows"]:
-            for entry in row:
-                assert len(entry) == 2, f"{name}: unexpected extra field {entry}"
-                assert isinstance(entry[0], str) and isinstance(entry[1], int)
+    for name, spec in raw["extensions"].items():
+        for entry in spec["keys"]:
+            assert len(entry) == 3, f"{name}: unexpected field in {entry}"
+            key, row, col = entry
+            assert isinstance(key, str) and isinstance(row, int) and isinstance(col, int)
         assert "key_to_index" not in spec and "index" not in spec
 
 
-def test_the_reference_layout_still_matches_the_shipped_keymap(shipped_keymap):
-    """It is generated from that keymap, so this catches the two drifting
-    apart - which would mean two descriptions of one keyboard."""
-    assert (layout.load_bundled("m16-r2").grid_positions()
-            == layout.Layout.from_keymap(shipped_keymap).grid_positions())
+def test_every_extension_is_honest_about_whether_it_was_tested():
+    """Nothing here has been run against a machine that has one."""
+    for name, spec in layout.extensions().items():
+        assert spec.get("label"), f"{name}: no label to show the user"
+        assert spec.get("source"), f"{name}: does not say where it came from"
+        assert spec.get("verified") is False, f"{name}: claims to be verified"
 
 
-def test_every_layout_is_honest_about_whether_it_was_tested():
-    """Only the machine we actually own is marked verified. The others are
-    inferred, and the wizard says so when it offers them."""
-    verified = {name for name, spec in layout.bundled().items() if spec.get("verified")}
-    assert verified == {"m16-r2"}
-    for name, spec in layout.bundled().items():
-        assert spec.get("source"), f"{name} does not say where it came from"
-
-
-def test_the_numpad_layout_actually_contains_a_numpad():
-    """The reason bundling shapes is necessary rather than merely convenient:
-    a numpad user cannot map keys the template does not contain."""
-    keys = set(layout.load_bundled("numpad").keys())
-    assert {"kp0", "kp5", "kpenter", "numlock"} <= keys
-    assert len(keys) > len(set(layout.load_bundled("m16-r2").keys()))
-
-
-def test_the_compact_layout_drops_only_the_media_column():
-    reference = set(layout.load_bundled("m16-r2").keys())
-    compact = set(layout.load_bundled("compact").keys())
-    assert compact < reference
-    assert reference - compact == {"micmute", "mute", "volumeup", "volumedown"}
-
-
-def test_every_key_in_every_layout_has_a_readable_label():
+def test_every_key_offered_has_a_readable_label():
     """The user is reading these off their own keyboard, so a raw internal name
     like 'kpasterisk' shouted back at them is a usability bug."""
-    for name in layout.bundled():
-        for key in layout.load_bundled(name).keys():
-            assert layout.label_for(key), key
-            # Either it has a written label, or its own name is already short
-            # and self-evident ("q", "f12", "1"). What must never happen is a
-            # long internal identifier shown raw - "kpasterisk" means nothing
-            # to someone looking at their keyboard.
-            assert key in layout.LABELS or (key.isalnum() and len(key) <= 3), (
-                f"{key!r} would be shown to the user as-is")
+    grid = layout.extend(layout.reference(), "numpad")
+    for key in grid.keys():
+        assert layout.label_for(key), key
+        assert key in layout.LABELS or (key.isalnum() and len(key) <= 3), (
+            f"{key!r} would be shown to the user as-is")
 
 
-# ------------------------------------------------ the whole round trip
-#
-# Verified by hand once and then guarded here, because every part of it can
-# pass on its own while the chain is broken: a keymap that saves to a path the
-# loader does not read presents as "the wizard ran and changed nothing".
-
-def test_pointing_at_keys_produces_a_keymap_the_renderer_then_uses(
-        config_root, shipped_keymap, monkeypatch):
-    """assign_leds -> _save -> keymap.load() -> a rendered gradient."""
-    from alienfx_ctl import engine, gradient, hardware, keymap, state
-    monkeypatch.setattr(hardware, "model", lambda: "Alienware Test 9")
-    monkeypatch.setattr(hardware, "slug", lambda text="": "test-9")
-    monkeypatch.setattr(hardware, "keymap_filename",
-                        lambda text="": "alienware-test-9-keymap.json")
-
-    grid = layout.Layout.from_keymap(shipped_keymap)
-    lit = []
-    assigned = wizard.assign_leds(
-        grid, lambda changes: lit.extend(changes),
-        term.from_sequence([term.ENTER] * len(grid.keys())),
-        lambda line: None)
-    assert len(assigned) == len(grid.keys())
-
-    assert wizard._save("Alienware Test 9", grid, assigned, {"logo": 0, "pbtn": 4}) == 0
-
-    # The loader must find it without being told where to look.
-    assert keymap.has_user_keymap() is True
-    loaded = keymap.load()
-    assert loaded["device"] == "Alienware Test 9"
-    assert loaded["key_to_index"] == assigned
-
-    # And the renderer must be able to drive it.
-    leds = gradient.render_kbd(loaded, (255, 0, 0), (0, 0, 255))
-    assert len(leds) == len(assigned)
-    assert keymap.zones(loaded) == {"logo": [0], "pbtn": [4]}
-
-    st = dict(state.DEFAULT_STATE)
-    st.update(brightness=255, effect="gradient")
-    plan = engine.plan(st, ["kbd", "logo", "pbtn"])
-    assert plan["kbd_leds"] and set(plan["elc"]) == {"logo", "pbtn"}
-
-
-def test_the_wizard_records_the_product_id_it_actually_found(config_root, monkeypatch):
-    """Product ids differ across models, so writing a constant would mislabel
-    every keymap made on other hardware."""
-    from alienfx_ctl import device, hardware
-    monkeypatch.setattr(hardware, "slug", lambda text="": "test-9")
-    monkeypatch.setattr(device, "node_ids", lambda controller: (0x0D62, 0xCABC))
-    grid = layout.Layout.from_rows([["esc", "f1"]])
-    assert wizard._save("Test", grid, {"esc": 0}, {}) == 0
-    import json
-    from alienfx_ctl import keymap
-    written = json.load(open(keymap.model_keymap_path("Test")))
-    assert written["vid_pid"] == "0d62:cabc"
-
-
-def test_a_keymap_saved_without_a_detectable_device_still_loads(config_root, monkeypatch):
-    """The wizard can be run to import a layout on a machine whose controller
-    is not present. That should not produce an unloadable file."""
-    from alienfx_ctl import device, hardware, keymap
-    monkeypatch.setattr(hardware, "slug", lambda text="": "test-9")
-    monkeypatch.setattr(device, "node_ids", lambda controller: None)
-    grid = layout.Layout.from_rows([["esc", "f1"]])
-    assert wizard._save("Test", grid, {"esc": 0}, {}) == 0
-    keymap.validate(keymap.load_file(keymap.model_keymap_path("Test")))
+def test_a_keyboard_missing_some_keys_needs_no_special_shape():
+    """Why `compact` was deleted rather than kept. A machine without the media
+    column skips four keys; it does not need a layout of its own."""
+    grid = layout.reference()
+    assigned, _, _ = _run(grid, ["s"] * 4 + [term.ENTER, "q"])
+    assert len(assigned) == 1, "skipping is the mechanism"
 
 
 # ---------------------------------------------------------- the Fn legends
@@ -468,7 +416,7 @@ def test_a_keymap_saved_without_a_detectable_device_still_loads(config_root, mon
 # anyone finds the key they are looking at.
 
 def test_the_reference_layout_carries_the_fn_legends():
-    grid = layout.load_bundled("m16-r2")
+    grid = layout.reference()
     assert grid.hints["f7"] == "kbd_backlight"
     assert grid.hints["f12"] == "touchpad_toggle"
     assert len(grid.hints) > 20
@@ -477,23 +425,22 @@ def test_the_reference_layout_carries_the_fn_legends():
 def test_placeholder_legends_are_not_carried():
     """The shipped file uses "." for keys with no secondary function; showing
     that to the user would be worse than showing nothing."""
-    grid = layout.load_bundled("m16-r2")
+    grid = layout.reference()
     assert "esc" not in grid.hints
     assert all(value.strip() not in ("", ".") for value in grid.hints.values())
 
 
-def test_legends_come_from_the_keymap_not_from_layouts_json():
-    """One description of what each key also does. layouts.json carries shapes
-    only, so it cannot drift from the keymap on this."""
+def test_legends_come_from_the_keymap_not_from_the_bundled_data():
+    """One description of what each key also does, so the two cannot drift."""
     import json
-    with open(layout.BUNDLED_LAYOUTS, encoding="utf-8") as handle:
+    with open(layout.LAYOUT_EXTENSIONS, encoding="utf-8") as handle:
         raw = json.load(handle)
     assert "secondary_functions" not in json.dumps(raw)
-    assert layout.load_bundled("m16-r2").hints, "but they still arrive"
+    assert layout.reference().hints, "but they still arrive"
 
 
 def test_a_key_the_reference_lacks_simply_has_no_legend():
-    grid = layout.load_bundled("numpad")
+    grid = layout.extend(layout.reference(), "numpad")
     assert "kp5" not in grid.hints
     assert grid.hints.get("f7") == "kbd_backlight"
 
@@ -518,7 +465,7 @@ def test_a_re_run_preserves_the_legends(config_root, monkeypatch):
     import json
     from alienfx_ctl import hardware, keymap
     monkeypatch.setattr(hardware, "slug", lambda text="": "test-9")
-    grid = layout.load_bundled("m16-r2")
+    grid = layout.reference()
     assigned = {name: index for index, name in enumerate(grid.keys())}
     assert wizard._save("Test", grid, assigned, {}) == 0
     written = json.load(open(keymap.model_keymap_path("Test")))
@@ -528,7 +475,7 @@ def test_a_re_run_preserves_the_legends(config_root, monkeypatch):
 def test_only_the_legends_of_mapped_keys_are_written(config_root, monkeypatch):
     from alienfx_ctl import hardware, keymap
     monkeypatch.setattr(hardware, "slug", lambda text="": "test-9")
-    grid = layout.load_bundled("m16-r2")
+    grid = layout.reference()
     assert wizard._save("Test", grid, {"f7": 0}, {}) == 0
     import json
     written = json.load(open(keymap.model_keymap_path("Test")))

@@ -66,13 +66,14 @@ Choose **Create New KeyMap**.
 
 ### 3. Pick the closest keyboard shape
 
-The wizard offers bundled shapes — with or without a numeric keypad, with or
-without the media column. Pick whichever looks most like your keyboard. It does
-not have to be exact: keys you don't have are skipped in a moment, and the shape
-only decides which keys you get asked about.
+The wizard asks one question: does your keyboard have a numeric keypad? Answer
+it and carry on. It does not have to be an exact match — keys you don't have are
+skipped in a moment, and the shape only decides which keys you get asked about.
 
-If none of them fit, say so in an issue and include a photo of the keyboard. A
-new shape is a small addition.
+The keypad is asked about separately because it is the one thing skipping cannot
+fix: you can skip a key you don't have, but you cannot conjure one the shape is
+missing. If your keyboard has some other block of keys nothing asks you about,
+say so in an issue with a photo — adding one is a few lines of data.
 
 ### 4. Probe the chassis zones
 

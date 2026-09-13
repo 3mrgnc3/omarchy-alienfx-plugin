@@ -93,32 +93,35 @@ def test_declared_settings_match_the_settings_the_qml_reads(manifest):
 
 # ----------------------------------------------------------------- layouts
 
-def test_every_bundled_layout_is_described_honestly():
+def test_every_bundled_shape_extension_is_described_honestly():
     from alienfx_ctl import layout
-    raw = json.loads(_read("cli", "src", "alienfx_ctl", "data", "layouts.json"))
-    assert raw["layouts"]
-    for name, spec in raw["layouts"].items():
+    raw = json.loads(_read("cli", "src", "alienfx_ctl", "data", "layout-extensions.json"))
+    assert raw["extensions"]
+    for name, spec in raw["extensions"].items():
         assert spec.get("label"), f"{name}: no label to show the user"
-        assert "verified" in spec, f"{name}: must say whether it was tested"
-        assert spec.get("source"), f"{name}: must say where it came from"
+        assert spec.get("source"), f"{name}: does not say where it came from"
+        assert spec.get("verified") is False, f"{name}: claims to be verified"
+        assert spec.get("keys"), f"{name}: adds nothing"
 
 
-def test_no_bundled_layout_carries_an_led_index_or_a_duplicate_key():
-    """Indices are irregular on real hardware and cannot be inferred. A wrong
-    shape is visible and skippable; a wrong index silently lights the wrong key
-    and the user cannot tell our bad data from their own hardware."""
-    raw = json.loads(_read("cli", "src", "alienfx_ctl", "data", "layouts.json"))
-    for name, spec in raw["layouts"].items():
+def test_no_bundled_shape_carries_an_led_index_or_restates_the_keymap():
+    """Indices are irregular on real hardware and cannot be inferred - a wrong
+    one silently lights the wrong key. And anything the shipped keymap already
+    describes must not be stored a second time."""
+    from alienfx_ctl import layout
+    raw = json.loads(_read("cli", "src", "alienfx_ctl", "data", "layout-extensions.json"))
+    base = set(layout.reference().keys())
+    for name, spec in raw["extensions"].items():
         seen = set()
-        for row in spec["rows"]:
-            assert row, f"{name}: empty row"
-            for entry in row:
-                assert len(entry) == 2, f"{name}: unexpected field in {entry}"
-                key, col = entry
-                assert isinstance(key, str) and key
-                assert isinstance(col, int) and col >= 0
-                assert key not in seen, f"{name}: {key} appears twice"
-                seen.add(key)
+        for entry in spec["keys"]:
+            assert len(entry) == 3, f"{name}: unexpected field in {entry}"
+            key, row, col = entry
+            assert isinstance(key, str) and key
+            assert isinstance(row, int) and row >= 0
+            assert isinstance(col, int) and col >= 0
+            assert key not in seen, f"{name}: {key} appears twice"
+            assert key not in base, f"{name}: {key} is already in the shipped keymap"
+            seen.add(key)
 
 
 def test_the_shipped_keymap_is_valid():

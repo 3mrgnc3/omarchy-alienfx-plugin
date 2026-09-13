@@ -327,37 +327,42 @@ def assign_leds(grid, paint, read_key, echo, max_index=_MAX_INDEX,
 
 
 def _choose_grid(echo) -> "layout.Layout":
-    """Pick the starting layout for this machine.
+    """Pick the starting shape for this machine's keyboard.
 
     There is deliberately no "type the keys out yourself" option. The whole
     difficulty the wizard exists to solve is that the user does not know these
-    names - asking them to produce eighty-five of them is the least usable
-    thing it could do. A template also carries real column positions, which
-    naming cannot express: a key that spans two columns, or the gap before the
-    media column, is invisible in a list of names and the diagonal blend reads
-    exactly those columns.
+    names, so asking for eighty-five of them is the least usable thing it could
+    do. A shape also carries real column positions, which naming cannot express:
+    a key spanning two columns, or the gap before the media column, is invisible
+    in a list of names, and the diagonal blend reads exactly those columns.
 
-    A machine whose keyboard differs from the template still works: keys it does
-    not have get skipped, and the saved keymap records only what was confirmed.
+    The shape does not have to match perfectly. Keys this machine lacks are
+    skipped with a keypress. What cannot be done is map a key the shape does not
+    contain at all, which is why the keypad is offered - you can skip a key you
+    do not have, but you cannot conjure one.
     """
     echo("")
     echo("Keyboard layout")
     echo("-" * 15)
     echo("The wizard needs the shape of your keyboard before it can ask which")
-    echo("LED belongs to which key.")
+    echo("LED belongs to which key. Keys yours does not have are skipped as you")
+    echo("go, so a close match is fine.")
     echo("")
-    options = sorted(layout.bundled().items())
-    for number, (name, spec) in enumerate(options, start=1):
-        mark = "" if spec.get("verified") else "   (untested - adjust as needed)"
-        echo(f"  {number}. {spec.get('label', name)}{mark}")
-    other = len(options) + 1
-    echo(f"  {other}. Start from another keymap file")
+    echo("  1. Standard layout, no numeric keypad")
+    echo("  2. With a numeric keypad on the right")
+    echo("  3. Start from an existing keymap file")
 
     while True:
-        choice = _ask(f"\n  Choose [1-{other}]: ", "1")
-        if choice.isdigit() and 1 <= int(choice) <= len(options):
-            return layout.load_bundled(options[int(choice) - 1][0])
-        if choice == str(other):
+        choice = _ask("\n  Choose [1-3]: ", "1")
+        try:
+            if choice in ("1", ""):
+                return layout.reference()
+            if choice == "2":
+                return layout.extend(layout.reference(), "numpad")
+        except (keymap.KeymapError, layout.LayoutError) as exc:
+            echo(f"  cannot build that layout: {exc}")
+            continue
+        if choice == "3":
             path = _ask("  Path to a keymap file: ")
             if not path:
                 continue
@@ -366,7 +371,7 @@ def _choose_grid(echo) -> "layout.Layout":
             except (keymap.KeymapError, layout.LayoutError, OSError) as exc:
                 echo(f"  cannot use that file: {exc}")
                 continue
-        echo(f"  please choose 1 to {other}")
+        echo("  please choose 1, 2 or 3")
 
 
 def create_new() -> int:

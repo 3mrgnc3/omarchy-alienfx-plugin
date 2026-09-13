@@ -320,24 +320,26 @@ It gets a theme gradient across the four keyboard zones from that data alone. An
 and asking what came on, and it will save a zone-only keymap on a machine with no per-key
 controller.
 
-### Bundled keyboard shapes
+### The keyboard shape
 
-The wizard needs the shape of your keyboard before it can ask which LED belongs to which
-key, so three are bundled:
+The wizard needs the shape of your keyboard before it can ask which LED belongs
+to which key. The shape comes from the shipped keymap at runtime — not stored a
+second time as data — and the wizard offers one optional extension, a numeric
+keypad, in `data/layout-extensions.json`.
 
-| id | keys | tested |
-|---|---|---|
-| `m16-r2` | 85 | yes, probed on real hardware |
-| `compact` | 81 | no — `m16-r2` without the media column (14/15 inch) |
-| `numpad` | 102 | no — `m16-r2` plus a standard keypad block (16/17 inch) |
+A close match is enough: keys your machine lacks are skipped with a keypress as
+you go. The keypad is offered separately because that is the one case skipping
+cannot solve — **you can skip a key you do not have, but you cannot conjure one
+the shape is missing.**
 
-These carry **no LED indices**, and that is deliberate rather than laziness. Indices are
-irregular on real hardware: on the reference machine row bases are near-multiples of 20
-(0, 20, 40, 61, 81, 100) but within rows they skip — `backspace` is 34 where the pattern
-says 33, the left arrow is 133 where a formula predicts 113, and the media keys sit alone
-at 156–159. That is PCB routing, not logic, and a formula fitting 34 of 85 keys is not a
-rule. Every tool in this space probes for them instead, and so does this one. A wrong shape
-is visible and skippable; a wrong index silently lights the wrong key.
+No bundled shape carries an LED index, and that is deliberate. Indices are
+irregular on real hardware: on the tested machine row bases are near-multiples
+of 20 (0, 20, 40, 61, 81, 100) but within rows they skip — `backspace` is 34
+where the pattern says 33, the left arrow is 133 where a formula predicts 113,
+and the media keys sit alone at 156–159. That is PCB routing, not logic, and a
+formula fitting 34 of 85 keys is not a rule. Every tool in this space probes for
+them instead, and so does this one. A wrong shape is visible and skippable; a
+wrong index silently lights the wrong key.
 
 `alienfx-ctl keymap gaps` reports LED indices the keymap does not name and flags the ones
 adjacent to a named key — reach for it first if a single key ever behaves oddly.

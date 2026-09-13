@@ -22,21 +22,24 @@ import os
 
 from . import gradient
 
-#: Bundled keyboard *shapes* - which keys exist and where they sit.
+#: Optional blocks of keys that some keyboards have and the reference machine
+#: does not.
 #:
-#: Deliberately no LED indices. Those are irregular on real hardware and cannot
-#: be derived: on the reference machine the row bases are near-multiples of 20
-#: (0, 20, 40, 61, 81, 100) but within rows the indices skip - backspace is 34
-#: where the pattern says 33, every row-2 key is one higher, the left arrow is
-#: 133 where a formula predicts 113, and the media keys sit alone at 156-159.
-#: That is PCB routing, not logic, which is why every tool in this space probes
-#: for it rather than shipping tables of it.
+#: The base shape is deliberately *not* stored as data. It is read from the
+#: shipped keymap at runtime, because that file already describes this keyboard
+#: completely - storing it a second time meant two copies to keep in step, and a
+#: test whose only job was to police the fact that they matched.
 #:
-#: A layout is still worth bundling, and not merely as a convenience: the wizard
-#: asks the user to point at keys from a template, so on a keyboard shaped
-#: differently from the reference - one with a numeric keypad, say - there would
-#: otherwise be no way to map those keys at all.
-BUNDLED_LAYOUTS = os.path.join(os.path.dirname(__file__), "data", "layouts.json")
+#: An earlier version bundled three whole layouts. Measured, they carried 17
+#: keys of information between them: one was byte-identical to the shipped
+#: keymap's grid, and another was that minus four media keys, which a user
+#: without them skips in four keypresses. Only the keypad was ever real, because
+#: a key the template lacks cannot be mapped at all - you can skip a key you do
+#: not have, but you cannot conjure one.
+#:
+#: Nothing here carries an LED index. Those are irregular on real hardware and
+#: cannot be derived, so they are probed; see docs/dead-ends.md.
+LAYOUT_EXTENSIONS = os.path.join(os.path.dirname(__file__), "data", "layout-extensions.json")
 
 
 class LayoutError(ValueError):
@@ -204,33 +207,36 @@ def label_for(name: str) -> str:
     return LABELS.get(name, name.upper())
 
 
-def bundled() -> dict:
-    """``{id: spec}`` for every bundled layout."""
-    with open(BUNDLED_LAYOUTS, encoding="utf-8") as handle:
-        return json.load(handle).get("layouts") or {}
+def reference() -> "Layout":
+    """The keyboard this project was probed on, from the shipped keymap.
 
-
-def load_bundled(name: str) -> "Layout":
-    """Build a layout from the bundled set.
-
-    Fn legends come from the shipped keymap rather than being repeated in
-    layouts.json - every bundled shape derives from that keyboard, so there is
-    one description of what each key also does. Keys the reference does not have
-    (a numeric keypad) simply have no legend.
+    The starting point the wizard offers. Built from the keymap rather than
+    duplicated as data, so the two cannot drift apart.
     """
-    spec = bundled().get(name)
-    if spec is None:
-        raise LayoutError(f"no bundled layout named {name!r}")
-    return Layout(
-        [[(key, int(col)) for key, col in row] for row in spec["rows"]],
-        reference_hints(),
-    )
-
-
-def reference_hints() -> dict:
-    """The Fn legends of the reference keyboard, if they can be read."""
     from . import keymap
-    try:
-        return Layout.from_keymap(keymap.load_file(keymap.SHIPPED_KEYMAP)).hints
-    except Exception:
-        return {}
+    return Layout.from_keymap(keymap.load_file(keymap.SHIPPED_KEYMAP))
+
+
+def extensions() -> dict:
+    """``{id: spec}`` for every optional block of extra keys."""
+    with open(LAYOUT_EXTENSIONS, encoding="utf-8") as handle:
+        return json.load(handle).get("extensions") or {}
+
+
+def extend(grid: "Layout", name: str) -> "Layout":
+    """A copy of ``grid`` with a named block of keys added.
+
+    Rows are matched by index and the new keys sorted into place by column, so
+    a keypad lands to the right of the keys already there.
+    """
+    spec = extensions().get(name)
+    if spec is None:
+        raise LayoutError(f"no layout extension named {name!r}")
+
+    rows = [list(row) for row in grid.rows]
+    for key, row_index, col in spec["keys"]:
+        while len(rows) <= int(row_index):
+            rows.append([])
+        rows[int(row_index)].append((str(key), int(col)))
+    return Layout([sorted(row, key=lambda pair: pair[1]) for row in rows],
+                  grid.hints)
