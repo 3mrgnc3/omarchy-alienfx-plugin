@@ -134,9 +134,47 @@ Panel {
   property var pending: ({})
 
   function intend(field, value, argv) {
-    root.pending[field] = { value: value, argv: argv, retried: false }
+    // Reassigned rather than mutated: QML re-evaluates a binding only when the
+    // property itself changes, so mutating this object in place would leave
+    // every `enabled:` binding stuck and controls greyed out for ever.
+    var next = {}
+    for (var key in root.pending) next[key] = root.pending[key]
+    next[field] = { value: value, argv: argv, retried: false }
+    root.pending = next
     root.touch()
     root.run(argv)
+    // Confirm promptly. A command lands on disk as it returns and a state read
+    // costs about 125ms, so this settles in roughly a third of a second rather
+    // than waiting out the ordinary debounce.
+    confirmTimer.restart()
+    releaseTimer.restart()
+  }
+
+  function forget(field) {
+    var next = {}
+    for (var key in root.pending) if (key !== field) next[key] = root.pending[key]
+    root.pending = next
+  }
+
+  // A control is held while the change the user just made is still being
+  // applied: it greys out and stops accepting input, so there is no doubt that
+  // something is in progress and no way to stack a second change on an
+  // unapplied one.
+  //
+  // This is the visible half. The guards above are the correctness half, since
+  // a reply can still arrive just after a control frees itself.
+  function held(field) { return root.pending[field] !== undefined }
+
+  readonly property real heldOpacity: 0.45
+  function heldFade(field) { return root.held(field) ? root.heldOpacity : 1.0 }
+
+  // Both pickers and the channel sliders share one block, and either end of the
+  // range being in flight holds all of it: they are written by the same command.
+  readonly property bool colourHeld: root.held("color") || root.held("secondary")
+
+  readonly property bool anythingHeld: {
+    for (var key in root.pending) return true
+    return false
   }
 
   // Returns true if `field` should be left alone this time round.
@@ -155,7 +193,7 @@ Panel {
       root.run(want.argv)            // say it once more, then let it go
       return true
     }
-    delete root.pending[field]
+    root.forget(field)
     return false
   }
 
@@ -282,10 +320,15 @@ Panel {
     root.loaded = true
     root.errorText = ""
 
-    // Adopt control values only from a reply that is not older than the user's
-    // last action. The settling window stays as a second line of defence for
-    // the case where a reply is current but the user is mid-gesture.
-    if (!root.replyIsStale() && !root.editing()) adoptFromState()
+    // Adopt from any reply that is not older than the user's last action.
+    //
+    // The settling window used to gate this too, which meant a confirmation
+    // could not arrive for 900ms and a held control stayed greyed for over a
+    // second. It is not needed here: replyIsStale rejects anything requested
+    // before the last edit, unconfirmed protects each field the user changed
+    // until the backend agrees, and adoptFromState still refuses outright while
+    // a slider is under the pointer.
+    if (!root.replyIsStale()) adoptFromState()
   }
 
   function adoptFromState() {
@@ -512,6 +555,28 @@ Panel {
       waitForEnd: true
       onStreamFinished: if (text && !root.loaded) root.errorText = String(text).trim()
     }
+  }
+
+  // Polls while a change waits to be confirmed, so a held control frees itself
+  // as soon as the backend agrees instead of waiting out the ordinary debounce.
+  // Stops on its own once nothing is pending.
+  Timer {
+    id: confirmTimer
+    interval: 180
+    repeat: true
+    running: root.anythingHeld
+    onTriggered: if (!root.anyDragging) root.refresh()
+  }
+
+  // Nothing may stay greyed out for ever. If the backend has not confirmed by
+  // now the retry has already gone out, so give the controls back and let
+  // ordinary reconciliation settle it. Without this one dropped command would
+  // leave a dead control and the only way out would be reopening the panel.
+  Timer {
+    id: releaseTimer
+    interval: 2500
+    repeat: false
+    onTriggered: root.pending = ({})
   }
 
   // Coalesces the refresh that follows any change, so a burst of slider
@@ -830,6 +895,9 @@ Panel {
         // -------------------------------------------------- ThemeSync
         Toggle {
           visible: root.loaded
+          enabled: !root.held("themesync")
+          opacity: root.heldFade("themesync")
+          Behavior on opacity { NumberAnimation { duration: 90 } }
           width: parent.width
           label: Model.ICON.palette + "  ThemeSync"
           description: "Blend a diagonal gradient from the active Omarchy theme across every zone."
@@ -879,6 +947,9 @@ Panel {
 
           PanelSlider {
             id: brightnessSlider
+            enabled: !root.held("brightness")
+            opacity: root.heldFade("brightness")
+            Behavior on opacity { NumberAnimation { duration: 90 } }
             width: parent.width
             bar: root.bar
             minimum: 0
@@ -930,6 +1001,9 @@ Panel {
 
           PanelSlider {
             id: intensitySlider
+            enabled: !root.held("intensity")
+            opacity: root.heldFade("intensity")
+            Behavior on opacity { NumberAnimation { duration: 90 } }
             width: parent.width
             bar: root.bar
             minimum: -10
@@ -962,6 +1036,9 @@ Panel {
 
         Toggle {
           visible: root.loaded && !root.themesync
+          enabled: !root.held("zonesync")
+          opacity: root.heldFade("zonesync")
+          Behavior on opacity { NumberAnimation { duration: 90 } }
           width: parent.width
           label: (root.zonesync ? Model.ICON.link : Model.ICON.unlink) + "  ZoneSync"
           description: "Change every zone together. Turn off to control each zone on its own."
@@ -979,6 +1056,9 @@ Panel {
         // -------------------------------------------------- zone selector
         Column {
           visible: root.loaded && !root.themesync && !root.zonesync
+          enabled: !root.held("selected_zone")
+          opacity: root.heldFade("selected_zone")
+          Behavior on opacity { NumberAnimation { duration: 90 } }
           width: parent.width
           spacing: Style.space(7)
 
@@ -1006,6 +1086,9 @@ Panel {
         // -------------------------------------------------- colour
         Column {
           visible: root.loaded && !root.themesync
+          enabled: !root.colourHeld
+          opacity: root.colourHeld ? root.heldOpacity : 1.0
+          Behavior on opacity { NumberAnimation { duration: 90 } }
           width: parent.width
           spacing: Style.space(7)
 
@@ -1112,6 +1195,9 @@ Panel {
         // -------------------------------------------------- effects
         Column {
           visible: root.loaded && !root.themesync
+          enabled: !root.held("effect")
+          opacity: root.heldFade("effect")
+          Behavior on opacity { NumberAnimation { duration: 90 } }
           width: parent.width
           spacing: Style.space(7)
 
