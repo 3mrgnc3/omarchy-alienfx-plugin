@@ -9,17 +9,14 @@
 var ICON = {
   alien:       "󰢚",
   alienAlt:    "",
-  palette:     "󰚵",
+  palette:     "",
   link:        "󰌷",
   unlink:      "󰌺",
   effects:     "󰁨",
   profile:     "󰉋",
   save:        "󰆓",
   keyboard:    "󰌌",
-  brightness:  "󰃞",
-  check:       "󰄬",
-  touchpad:    "󰴟",
-  power:       "󰐥"
+  check:       "󰄬"
 };
 
 var ZONE_LABELS = {
@@ -188,18 +185,4 @@ function parseState(text) {
   } catch (e) {
     return null;
   }
-}
-
-if (typeof module !== "undefined") {
-  module.exports = {
-    ICON: ICON, ZONE_LABELS: ZONE_LABELS, ZONE_ORDER: ZONE_ORDER,
-    EFFECT_LABELS: EFFECT_LABELS, EFFECT_ORDER: EFFECT_ORDER,
-    clamp255: clamp255, hexToRgb: hexToRgb, rgbToHex: rgbToHex,
-    intensityLabel: intensityLabel,
-    zoneHex: zoneHex, brightnessPercent: brightnessPercent,
-    zoneOptions: zoneOptions, effectOptions: effectOptions,
-    profileOptions: profileOptions, parseState: parseState,
-    streamSafe: streamSafe, hexColor: hexColor, complementHex: complementHex,
-    rgbToHsv: rgbToHsv, hsvToRgb: hsvToRgb
-  };
 }
