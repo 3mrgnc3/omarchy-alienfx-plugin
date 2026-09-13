@@ -45,7 +45,7 @@ def _shape(rgb, st) -> tuple:
     This is the single funnel every colour passes through - the two gradient
     anchors, the chassis samples, solid fills and effect colours - which is why
     one control here covers every mode. Note *anchors*, not interpolated keys:
-    see docs/dead-ends.md for what happened when this ran per key.
+    running this per key collapsed the blend into flat bands.
     """
     shaped = colors.apply_intensity(rgb, int(st.get("intensity", 0) or 0))
     return colors.scale(shaped, int(st.get("brightness", 255)))

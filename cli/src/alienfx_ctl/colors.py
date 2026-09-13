@@ -264,7 +264,7 @@ def apply_intensity(rgb, intensity: int = 0) -> tuple:
         -10  saturation 0.05  (only just tinted)
 
     Applied to the two gradient anchors, never per interpolated key - see
-    docs/dead-ends.md, where doing the latter collapsed the blend into bands.
+    the two anchors; doing the latter collapsed the blend into flat bands.
     """
     return set_saturation(rgb, intensity_saturation(intensity))
 

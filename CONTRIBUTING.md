@@ -217,10 +217,15 @@ and none is wanted. Everything runs offline and nothing needs hardware. The
 protocol tests capture the bytes that would have reached the device and assert
 on them.
 
-**Please read `docs/dead-ends.md` before changing anything in the hardware
-layer.** It records things that were tried and did not work, including two that
-will brick the keyboard until you reboot, and several that looked like bugs but
-were not. It exists so the same afternoon isn't lost twice.
+**Before changing anything in the hardware layer, read the dead-ends note on the
+`archive-reference` branch.** It records things that were tried and did not work,
+including two that will brick the keyboard until you reboot, and several that
+looked like bugs but were not. It exists so the same afternoon isn't lost twice.
+
+```bash
+git fetch origin archive-reference
+git checkout archive-reference -- docs/dead-ends.md
+```
 
 Two rules worth stating plainly:
 

@@ -125,7 +125,6 @@ Anchors come from the theme's `colors.toml`: the accent at one end, its most hue
 saturated colour at the other. A near-monochrome theme gets a synthesised complement rather
 than a flat fill.
 
-`docs/dead-ends.md` has the measurements and the things that didn't work.
 
 ### Intensity
 
@@ -231,14 +230,17 @@ share/udev/                            the uaccess rule
 share/systemd/                         restore and resume units
 share/omarchy/hooks/theme-set.d/       the theme-switch hook
 share/bin/                             the wizard's terminal launcher
-docs/dead-ends.md                      what doesn't work, and why
 ```
 
-Read `docs/dead-ends.md` before changing the hardware layer. It records failures that cost
-real time, including two that brick the keyboard until you reboot.
+Earlier versions of this tool, and a long note on things that didn't work, are on the
+`archive-reference` branch rather than `main`, to keep them out of every clone. That note is
+worth reading before changing the hardware layer: it records failures that cost real time,
+including two that brick the keyboard until you reboot.
 
-Earlier versions of this tool are on the `archive-reference` branch rather than `main`, to
-keep them out of every clone. Fetch with `git checkout archive-reference -- archive/`.
+```bash
+git fetch origin archive-reference
+git checkout archive-reference -- archive/ docs/dead-ends.md
+```
 
 ## Development
 

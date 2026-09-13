@@ -14,7 +14,7 @@ deliberately, not a surprise to discover on the keyboard.
 
 One earlier attempt to "improve" this - raising the saturation threshold and
 borrowing the accent's brightness for the chosen hue - was reverted for
-inventing colours the theme never specified. See docs/dead-ends.md.
+inventing colours the theme never specified.
 """
 
 import json

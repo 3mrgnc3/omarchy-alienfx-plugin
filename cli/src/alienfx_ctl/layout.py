@@ -38,7 +38,7 @@ from . import gradient
 #: not have, but you cannot conjure one.
 #:
 #: Nothing here carries an LED index. Those are irregular on real hardware and
-#: cannot be derived, so they are probed; see docs/dead-ends.md.
+#: cannot be derived, so they are probed.
 LAYOUT_EXTENSIONS = os.path.join(os.path.dirname(__file__), "data", "layout-extensions.json")
 
 
