@@ -11,28 +11,24 @@ Runs unprivileged. No `sudo`, no root daemon.
 
 ## Which laptops
 
-Tested on one machine, an Alienware m16 R2. Everything else is work in progress and help
+Tested on my Alienware m16 R2. Everything else is work in progress and help
 is welcome.
 
-Most of the plugin is already model independent. The lighting protocol is the same across
+Most of the plugin is already model independent. The lighting protocol should be the same across
 Alienware machines, controllers are found by USB vendor and HID report shape rather than a
 hard-coded product id, chassis zones come from a per-model file, and laptops that light the
 keyboard as four zones instead of per key are supported.
 
 What differs between machines is which LED belongs to which key, and that can't be worked
-out remotely. LED numbering follows the circuit board, not the keyboard: on the tested
-machine `backspace` is 34 where the obvious pattern says 33, and the left arrow is 133
-where a formula predicts 113. So no LED numbers here are guessed. A wrong one silently
-lights the wrong key, which is worse than shipping none.
+out using the keymap wizard. LED numbering follows the circuit board, not the keyboard: for example, on the tested machine the `backspace` key is indexed as 34 where the obvious pattern expects 33, and the left arrow is 133 where an assumed prediction may come out at 113.
 
-Instead there's a wizard. It lights one LED at a time and you walk it onto the right key
-with the arrow keys, guessing the next one and learning from your corrections. Ten minutes
-and your machine is mapped.
+So the plugin cli component does not try to guess, predict, or assume the layout of other models. Instead there's a wizard. It lights one LED at a time and you walk it onto the right key
+with the arrow keys, figuring out the next key and learning from your corrections. In this way it should only take 3 to 5 minutes of walking the keys and saving the positions, and your machine is mapped.
 
 If you own a different AlienFX laptop, please send the keymap back. Adding a model is a
-data change with no code behind it. See [CONTRIBUTING.md](CONTRIBUTING.md).
+data change with no code behind it and I can include these in the plugin's default collection if other users want to contribute them. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## What it controls
+## What it controls on my laptop and should be able to controll on similar hardware too
 
 | Zone | Hardware |
 |---|---|
@@ -49,10 +45,47 @@ data change with no code behind it. See [CONTRIBUTING.md](CONTRIBUTING.md).
 omarchy plugin add https://github.com/3mrgnc3/omarchy-alienfx-plugin.git --enable
 ```
 
-This installs only the QML, so the popup will offer **Complete setup** on first click. The
-udev rule, the CLI and the systemd units live outside the plugin folder. Complete setup
-opens a terminal, checks dependencies, tells you what's missing and asks before changing
-anything. The udev step needs your password once.
+This installs only the QML, so on first run a popup will offer **Complete setup** on first click. This installs the udev rule, the CLI tool and the systemd units that live outside the plugin folder. The Complete setup process opens a terminal, checks dependencies, tells you what's missing and asks before changing
+anything. The udev step needs your password once. This project codebase is small, and users can quickly and easily verify it before install. 
+
+
+![default-mode-01](images/default-mode-01.png)
+
+### Themesync mode on Hackerman Theme
+
+![hackerman-themesync](images/themesync-green.jpg)
+
+### Themesync mode on Atheria Theme
+
+![hackerman-themesync](images/themesync-magenta.jpg)
+
+## Example of the wizard menu interface
+
+```bash
+================================================================
+ AlienFX KeyMap Wizard
+================================================================
+
+A keymap records which LED belongs to which key, where that key sits,
+and which chassis zones this machine has. Layouts differ between
+models and regions, so each machine keeps its own.
+
+  Machine  : Alienware m16 R2 (sku 0C91, BIOS 1.19.0)
+  Keymaps  : /home/mrgnc/.config/omarchy-alienfx-plugin/keymap
+  Expected : alienware-m16-r2-keymap.json
+  Installed: Alienware m16 R2: 85 keys mapped, 3 chassis zones (logo, pbtn, tpd)
+             /home/mrgnc/.config/omarchy-alienfx-plugin/keymap/alienware-m16-r2-keymap.json
+
+  1. Load Existing KeyMap File
+  2. Create New KeyMap
+  3. Exit
+
+Choose [1-3]:
+
+```
+
+
+
 
 ### From a clone
 
@@ -95,76 +128,41 @@ omarchy plugin remove 3mrgnc3.alienfx
 Run `uninstall.sh` first. `omarchy plugin remove` deletes the plugin folder, which is all
 Omarchy knows about, and the script lives in it.
 
-## The popup
-
-- **ThemeSync** on by default. Blends the active theme across every zone and repaints on
-  theme change.
-- **Brightness** and **Intensity** sliders.
-- **ZoneSync** to drive all zones together, or off to set each one separately.
-- **Colour pickers**, two of them, for the ends of a gradient range.
-- **Effects**: Gradient, Wave, Pulse, Nightrider, Solid.
-- **Profiles**: save and reload a whole setup by name.
-- **KeyMap Wizard**, reachable from the keyboard icon at any time.
-
-## The gradient
-
-Only the keyboard is addressable per key, so it carries the real gradient. Each key's row
-and column are normalised against the keymap and averaged for a top-left to bottom-right
-diagonal.
-
-Two things are less obvious. The blend holds near each anchor colour and crosses over
-quickly through the middle, because key density along the diagonal peaks in the centre:
-43 of 85 keys sit in the middle fifth of the range, so an even ramp spends most of its
-surface on the intermediate hues. And interpolation runs through gamut-mapped OkLCh rather
-than a straight line, which keeps chroma up instead of fading through grey.
-
-The chassis zones take the exact colour of the corner key beside them. The touchpad matches
-`esc`, the power button matches the bottom-right key.
-
-Anchors come from the theme's `colors.toml`: the accent at one end, its most hue-distant
-saturated colour at the other. A near-monochrome theme gets a synthesised complement rather
-than a flat fill.
-
-
-### Intensity
-
-Keycaps sit behind a diffuser that mixes white into everything, so a colour that looks
-right on screen reads washed out on the keys. Intensity is an absolute saturation target
-and the only saturation control.
-
-| Slider | Saturation |
-|---|---|
-| -10 | 0.40, muted |
-| 0 | 0.85, the default |
-| +10 | 1.00 |
-
-It applies in every mode. `alienfx-ctl set --intensity N`.
 
 ## CLI
 
 Everything the popup does is available by hand, which makes it debuggable without the
 shell running.
 
+
+The plugin controls the independant alienfx-cli tool that can also be used in a standalone way.
+
 ```bash
-alienfx-ctl devices                    # what was found, and is it writable?
-alienfx-ctl state                      # current settings
-alienfx-ctl state --json               # what the plugin reads
+~ ❯ alienfx-ctl -h
+usage: alienfx-ctl [-h] [--version] {state,set,solid,off,effect,theme,themesync,zonesync,stream,commit,restore,profile,keymap,devices} ...
 
-alienfx-ctl solid --color ff7800 --brightness 10
-alienfx-ctl solid --color '255,120,0' --zones kbd,logo
-alienfx-ctl off --zones all
-alienfx-ctl effect nightrider --color red --speed slow
+Control the RGB lighting zones on a supported Alienware laptop.
 
-alienfx-ctl theme show                 # anchors derived from the active theme
-alienfx-ctl theme apply                # paint the theme gradient now
-alienfx-ctl themesync on|off|status
-alienfx-ctl zonesync on|off
+positional arguments:
+  {state,set,solid,off,effect,theme,themesync,zonesync,stream,commit,restore,profile,keymap,devices}
+    state               show current state
+    set                 change settings and apply (the plugin's entry point)
+    solid               set a flat colour
+    off                 turn zones off
+    effect              run an effect
+    theme               theme palette sync
+    themesync           turn theme syncing on or off
+    zonesync            control all zones together or individually
+    stream              read commands from stdin with the devices held open
+    commit              re-apply state durably (programs power-button NVRAM)
+    restore             re-apply saved state (login/resume)
+    profile             named profiles
+    keymap              per-key keymap management
+    devices             show detected controllers and access
 
-alienfx-ctl profile list|save NAME|load NAME|rename OLD NEW|delete NAME
-alienfx-ctl keymap status|show|import PATH|wizard
-alienfx-ctl restore                    # what the systemd unit runs
-
-alienfx-ctl set --color 00ff88 --zones logo --dry-run -v   # show, write nothing
+options:
+  -h, --help            show this help message and exit
+  --version             show program's version number and exit
 ```
 
 Colours accept `RRGGBB`, `#RRGGBB`, `r,g,b`, a name, or `@themekey` to pull from the active
@@ -257,3 +255,6 @@ ones the QML reads, the bundled layouts, and the shell scripts parsing.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+
+[def]: images/default-mode-01.png
