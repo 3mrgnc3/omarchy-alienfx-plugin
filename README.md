@@ -11,8 +11,17 @@ Runs unprivileged. No `sudo`, no root daemon.
 
 ## Which laptops
 
-Tested on my Alienware m16 R2. Everything else is work in progress and help
-is welcome.
+**Proven on one machine:**
+
+| | |
+|---|---|
+| Laptop | Alienware m16 R2, BIOS 1.19.0 |
+| Omarchy | 4.0.2 |
+
+Every other Alienware is untested. It may work, it may not, and I have no way to
+find out on my own. If you have one, testing it and sending back a keymap is the
+single most useful thing you can do for this plugin. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 Most of the plugin is already model independent. The lighting protocol should be the same across
 Alienware machines, controllers are found by USB vendor and HID report shape rather than a
@@ -20,13 +29,14 @@ hard-coded product id, chassis zones come from a per-model file, and laptops tha
 keyboard as four zones instead of per key are supported.
 
 What differs between machines is which LED belongs to which key, and that can't be worked
-out using the keymap wizard. LED numbering follows the circuit board, not the keyboard: for example, on the tested machine the `backspace` key is indexed as 34 where the obvious pattern expects 33, and the left arrow is 133 where an assumed prediction may come out at 113.
+out remotely, only on the machine itself. LED numbering follows the circuit board, not the keyboard: for example, on the tested machine the `backspace` key is indexed as 34 where the obvious pattern expects 33, and the left arrow is 133 where an assumed prediction may come out at 113.
 
 So the plugin cli component does not try to guess, predict, or assume the layout of other models. Instead there's a wizard. It lights one LED at a time and you walk it onto the right key
 with the arrow keys, figuring out the next key and learning from your corrections. In this way it should only take 3 to 5 minutes of walking the keys and saving the positions, and your machine is mapped.
 
 If you own a different AlienFX laptop, please send the keymap back. Adding a model is a
-data change with no code behind it and I can include these in the plugin's default collection if other users want to contribute them. See [CONTRIBUTING.md](CONTRIBUTING.md).
+data change with no code behind it, and I will fold contributed keymaps into the plugin so
+the next owner of that machine gets it for free.
 
 ## What it controls on my laptop and should be able to control on similar hardware too
 
