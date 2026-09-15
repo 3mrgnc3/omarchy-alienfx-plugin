@@ -28,7 +28,7 @@ with the arrow keys, figuring out the next key and learning from your correction
 If you own a different AlienFX laptop, please send the keymap back. Adding a model is a
 data change with no code behind it and I can include these in the plugin's default collection if other users want to contribute them. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## What it controls on my laptop and should be able to controll on similar hardware too
+## What it controls on my laptop and should be able to control on similar hardware too
 
 | Zone | Hardware |
 |---|---|
@@ -49,15 +49,15 @@ This installs only the QML, so on first run a popup will offer **Complete setup*
 anything. The udev step needs your password once. This project codebase is small, and users can quickly and easily verify it before install. 
 
 
-![default-mode-01](images/default-mode-01.png)
+![The AlienFX popup](images/default-mode-01.png)
 
-### Themesync mode on Hackerman Theme
+### ThemeSync mode on the Hackerman theme
 
-![hackerman-themesync](images/themesync-green.jpg)
+![ThemeSync on the Hackerman theme](images/themesync-green.jpg)
 
-### Themesync mode on Atheria Theme
+### ThemeSync mode on the Aetheria theme
 
-![hackerman-themesync](images/themesync-magenta.jpg)
+![ThemeSync on the Aetheria theme](images/themesync-magenta.jpg)
 
 ## Example of the wizard menu interface
 
@@ -135,7 +135,7 @@ Everything the popup does is available by hand, which makes it debuggable withou
 shell running.
 
 
-The plugin controls the independant alienfx-cli tool that can also be used in a standalone way.
+The plugin controls the independent alienfx-ctl tool that can also be used in a standalone way.
 
 ```bash
 ~ ❯ alienfx-ctl -h
