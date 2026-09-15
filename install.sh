@@ -31,17 +31,21 @@ CONFIG_DIR="$HOME/.config/omarchy-alienfx-plugin"
 BAR_SECTION="${ALIENFX_BAR_SECTION:-right}"
 ASSUME_YES=0
 SKIP_DEPS=0
+HOLD=0
 
 for arg in "$@"; do
   case "$arg" in
     -y|--yes)  ASSUME_YES=1 ;;
     --no-deps) SKIP_DEPS=1 ;;
+    --hold)    HOLD=1 ;;
     -h|--help)
       cat <<USAGE
 Usage: ./install.sh [--yes] [--no-deps]
 
   --yes       non-interactive: install any missing dependencies without asking
   --no-deps   do not install anything; report missing dependencies and continue
+  --hold      wait for Enter before exiting, so a terminal opened purely to run
+              this does not close before the result can be read
 USAGE
       exit 0 ;;
     *) echo "unknown option: $arg (try --help)" >&2; exit 2 ;;
@@ -303,3 +307,16 @@ Done. Look for the alien head in the '$BAR_SECTION' section of the bar.
 
 Uninstall with ./uninstall.sh
 DONE
+
+# The popup's "Complete setup" opens a terminal solely to run this, and that
+# terminal closes the moment the script exits. Without a pause the user sees the
+# window vanish and never learns whether it worked.
+#
+# It is a flag rather than something the caller appends, because every argument
+# handed to Omarchy's terminal helpers must be a single shell token: they build
+# their command as "$@" and then eval it, which drops quoting and splits a
+# multi-word argument apart. See share/bin/omarchy-alienfx-wizard.
+if (( HOLD )) && [[ -t 0 ]]; then
+  printf '\n[press Enter to close] '
+  read -r _
+fi

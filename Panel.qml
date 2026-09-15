@@ -286,10 +286,14 @@ Panel {
   function runSetup() {
     // The udev step needs root, so this has to happen in a terminal where sudo
     // (or pkexec) can prompt - not silently from the shell process.
+    // Single tokens only. Omarchy's terminal helpers build their command as
+    // "$@" and then eval it, which drops the quoting and splits a multi-word
+    // argument apart: a `bash -lc "...; read -r _"` snippet loses everything
+    // after the first semicolon, so the window closed before the user could
+    // read the result. The installer holds itself open instead.
     Quickshell.execDetached([
       "omarchy-launch-or-focus-tui", "--app-id=alienfx-setup",
-      "bash", "-lc",
-      "'" + root.bundledInstaller + "' ; printf '\\n[press Enter to close] ' ; read -r _"
+      root.bundledInstaller, "--hold"
     ])
     root.close()
   }
