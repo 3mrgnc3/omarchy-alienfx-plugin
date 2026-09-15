@@ -176,8 +176,7 @@ login. The CLI opens them as you.
 
 The rule is numbered `60-` on purpose. `uaccess` is applied by a builtin that runs from
 `73-seat-late.rules`, so a rule numbered above that is read too late and the tag is never
-seen. An earlier version of this project spent a long time chasing what looked like a
-boot-time race and was only ever a filename.
+seen.
 
 Nodes are resolved at runtime by vendor id and HID report shape, never by a fixed
 `/dev/hidrawN`. On this laptop `hidraw0` is sometimes a security key.
@@ -228,16 +227,6 @@ share/udev/                            the uaccess rule
 share/systemd/                         restore and resume units
 share/omarchy/hooks/theme-set.d/       the theme-switch hook
 share/bin/                             the wizard's terminal launcher
-```
-
-Earlier versions of this tool, and a long note on things that didn't work, are on the
-`archive-reference` branch rather than `main`, to keep them out of every clone. That note is
-worth reading before changing the hardware layer: it records failures that cost real time,
-including two that brick the keyboard until you reboot.
-
-```bash
-git fetch origin archive-reference
-git checkout archive-reference -- archive/ docs/dead-ends.md
 ```
 
 ## Development
