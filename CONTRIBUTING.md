@@ -227,6 +227,19 @@ like a colour problem.
 
 **Keyboard shapes** for layouts not covered, see step 3.
 
+**Getting the newest version.** The popup tells you when there is one: the
+version beside the title takes the accent colour and an info mark appears, and
+clicking it asks whether to update. By hand it is the same thing:
+
+```bash
+alienfx-ctl update
+```
+
+That fast-forwards the plugin folder and refreshes the CLI, the user services
+and the theme hook along with it, so the popup can never end up newer than the
+command it calls. Working from your own clone instead, re-run `./install.sh`
+after pulling.
+
 **Removing it again** when you are done testing:
 
 ```bash

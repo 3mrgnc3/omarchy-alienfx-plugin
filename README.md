@@ -55,9 +55,13 @@ the next owner of that machine gets it for free.
 omarchy plugin add https://github.com/3mrgnc3/omarchy-alienfx-plugin.git --enable
 ```
 
-This installs only the QML, so on first run a popup will offer **Complete setup** on first click. Before touching anything, the installer lists every component it will add, where each one goes, and which single step needs your password, then asks whether to continue. Declining changes nothing. This installs the udev rule, the CLI tool and the systemd units that live outside the plugin folder. The Complete setup process opens a terminal, checks dependencies, tells you what's missing and asks before changing
-anything. The udev step needs your password once. This project codebase is small, and users can quickly and easily verify it before install. 
+That installs the QML only. Click the alien head on the bar and choose **Complete setup**: it
+opens a terminal, lists every component it will add and where, checks dependencies, and asks
+before touching anything. Declining changes nothing.
 
+One step needs your password, the udev rule that makes the lighting reachable without sudo.
+The CLI and the systemd units go in at the same time. The codebase is small enough to read
+before you install it.
 
 ![The AlienFX popup](images/default-mode-01.png)
 
@@ -93,9 +97,6 @@ models and regions, so each machine keeps its own.
 Choose [1-3]:
 
 ```
-
-
-
 
 ### From a clone
 
@@ -156,7 +157,6 @@ password, and asks you to confirm before touching anything. Answering no changes
 refuses outright if it cannot ask, so a script or a stray pipe cannot wipe the install
 silently. Your profiles, keymap and settings are kept unless you add `--purge`.
 
-
 ## Updates
 
 Open the popup and the version sits next to the title. It is dim and says nothing most of
@@ -200,12 +200,10 @@ touch ~/.config/omarchy-alienfx-plugin/update-check.disabled
 The version still shows, it just stops asking. Check by hand at any time with
 `alienfx-ctl update-check`.
 
-
 ## CLI
 
 Everything the popup does is available by hand, which makes it debuggable without the
 shell running.
-
 
 The plugin controls the independent alienfx-ctl tool that can also be used in a standalone way.
 
@@ -308,6 +306,7 @@ share/udev/                            the uaccess rule
 share/systemd/                         restore and resume units
 share/omarchy/hooks/theme-set.d/       the theme-switch hook
 share/bin/                             the wizard's terminal launcher
+install.sh  update.sh  uninstall.sh   everything outside the plugin folder
 ```
 
 ## Development
@@ -325,6 +324,5 @@ ones the QML reads, the bundled layouts, and the shell scripts parsing.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
-
 
 [def]: images/default-mode-01.png
