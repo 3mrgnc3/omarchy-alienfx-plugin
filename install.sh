@@ -40,10 +40,15 @@ for arg in "$@"; do
     --hold)    HOLD=1 ;;
     -h|--help)
       cat <<USAGE
-Usage: ./install.sh [--yes] [--no-deps]
+Usage: ./install.sh [--yes] [--no-deps] [--hold]
 
-  --yes       non-interactive: install any missing dependencies without asking
-  --no-deps   do not install anything; report missing dependencies and continue
+Installs the CLI, a udev rule, two user services and a theme hook. Everything
+is listed on screen before anything is changed, and you are asked to confirm.
+
+  --yes       answer yes to everything: skips the confirmation AND installs any
+              missing dependencies without asking. Use only if you already know
+              what this installs.
+  --no-deps   do not install packages; report what is missing and continue
   --hold      wait for Enter before exiting, so a terminal opened purely to run
               this does not close before the result can be read
 USAGE

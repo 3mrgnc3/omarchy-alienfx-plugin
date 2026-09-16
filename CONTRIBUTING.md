@@ -30,12 +30,24 @@ why nothing here ships indices anybody guessed.
 
 ## Generating a keymap for your machine
 
-You need the laptop in front of you. It takes about ten minutes.
+You need the laptop in front of you. Mapping the keys takes three to five
+minutes; the whole thing, including installing, perhaps ten.
 
 ### 1. Install and check the hardware is found
 
 ```bash
 omarchy plugin add https://github.com/3mrgnc3/omarchy-alienfx-plugin.git --enable
+```
+
+That installs the QML only. Click the alien head on the bar, then **Complete
+setup**. It opens a terminal, lists everything it is about to add and where,
+and asks before touching anything. One step needs your password: a udev rule
+that grants your user direct access to the lighting controllers, generated from
+the controllers found on your machine. Nothing runs as root afterwards.
+
+Once that finishes you have the CLI:
+
+```bash
 alienfx-ctl devices
 ```
 
@@ -51,8 +63,17 @@ output of `alienfx-ctl devices`, which lists every HID device with its report
 shape. That is exactly what is needed to work out whether your machine speaks a
 variant not yet recognised.
 
-If one says `NOT writable`, the udev rule didn't install. Re-run `install.sh`,
-then unplug nothing and reboot.
+If one says `NOT writable`, the controller was found but the udev rule is not
+granting access to it. Check what the rule should contain:
+
+```bash
+alienfx-ctl udev-rule                      # what your machine needs
+cat /etc/udev/rules.d/60-omarchy-alienfx.rules   # what is installed
+```
+
+If they differ, or the file is missing, re-run **Complete setup**. If they match
+and access is still refused, say so in an issue with both outputs: that is a
+case worth understanding.
 
 ### 2. Run the wizard
 
@@ -205,6 +226,17 @@ and `alienfx-ctl keymap show` attached, plus which theme you were on if it looks
 like a colour problem.
 
 **Keyboard shapes** for layouts not covered, see step 3.
+
+**Removing it again** when you are done testing:
+
+```bash
+alienfx-ctl uninstall
+```
+
+That works whether or not the plugin folder is still there, lists everything it
+will delete, and asks before it does. Add `--purge` to drop your profiles and
+keymap too, but copy the keymap out first if you have mapped a keyboard, or you
+will be mapping it again.
 
 **Code**: run the tests before and after.
 

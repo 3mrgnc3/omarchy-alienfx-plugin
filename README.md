@@ -167,12 +167,13 @@ The plugin controls the independent alienfx-ctl tool that can also be used in a 
 
 ```bash
 ~ ❯ alienfx-ctl -h
-usage: alienfx-ctl [-h] [--version] {state,set,solid,off,effect,theme,themesync,zonesync,stream,commit,restore,profile,keymap,devices} ...
+usage: alienfx-ctl [-h] [--version]
+                   {state,set,solid,off,effect,theme,themesync,zonesync,stream,commit,restore,profile,keymap,devices,uninstall,udev-rule} ...
 
 Control the RGB lighting zones on a supported Alienware laptop.
 
 positional arguments:
-  {state,set,solid,off,effect,theme,themesync,zonesync,stream,commit,restore,profile,keymap,devices}
+  {state,set,solid,off,effect,theme,themesync,zonesync,stream,commit,restore,profile,keymap,devices,uninstall,udev-rule}
     state               show current state
     set                 change settings and apply (the plugin's entry point)
     solid               set a flat colour
@@ -187,6 +188,8 @@ positional arguments:
     profile             named profiles
     keymap              per-key keymap management
     devices             show detected controllers and access
+    uninstall           remove the plugin and everything it installed
+    udev-rule           print a udev rule for the controllers on this machine
 
 options:
   -h, --help            show this help message and exit

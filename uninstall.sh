@@ -31,8 +31,13 @@ for arg in "$@"; do
     -y|--yes) ASSUME_YES=1 ;;
     -h|--help)
       echo "Usage: ./uninstall.sh [--purge] [--yes]"
+      echo
+      echo "Removes the CLI, the udev rule, both user services and the theme"
+      echo "hook. Everything is listed before anything is deleted."
+      echo "Also available as: alienfx-ctl uninstall"
+      echo
       echo "  --purge   also delete profiles, keymap and saved state"
-      echo "  --yes     do not ask for confirmation"
+      echo "  --yes     skip the confirmation and remove everything immediately"
       exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
