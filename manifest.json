@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "3mrgnc3.alienfx",
   "name": "AlienFX",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "3mrgnc3",
   "license": "MIT",
   "description": "Alienware RGB lighting with a theme-synced diagonal gradient across the keyboard and chassis zones.",
