@@ -101,7 +101,10 @@ def cmd_state(args) -> int:
         payload = dict(st)
         payload["profiles"] = state.list_profiles()
         payload["current_profile"] = state.current_profile()
-        payload["has_keymap"] = keymap.has_user_keymap()
+        # Whether this machine is mapped at all, not whether the user probed
+        # it themselves. The popup turns its first-run wizard prompt on from
+        # this, and an owner of the reference model is already mapped.
+        payload["has_keymap"] = keymap.has_keymap_for_this_machine()
         # The plugin needs to tell "no CLI" apart from "CLI present but the
         # udev rule was never installed" - they look identical otherwise, and
         # only the second one means the lights silently do nothing.

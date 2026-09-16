@@ -297,3 +297,73 @@ def test_every_bundled_keymap_is_valid():
     directory = os.path.dirname(keymap.SHIPPED_KEYMAP)
     for path in glob.glob(os.path.join(directory, "*keymap*.json")):
         keymap.validate(keymap.load_file(path))
+
+
+# ------------------------------- is this machine mapped, or does it need the wizard
+#
+# The popup's large first-run wizard prompt used to key off has_user_keymap,
+# which asks whether the user probed a map themselves. That is the wrong
+# question: an owner of the reference model, or of any model someone has
+# contributed a map for, is already mapped correctly and has nothing to do. The
+# prompt appeared anyway, next to a keyboard that was lighting perfectly.
+
+def test_a_probed_keymap_counts(config_root, shipped_keymap):
+    state.write_json_atomic(keymap.user_keymap_path(), shipped_keymap)
+    assert keymap.has_keymap_for_this_machine() is True
+
+
+def test_the_reference_model_is_mapped_without_probing_anything(config_root, monkeypatch):
+    """This machine is the one the shipped keymap describes, so the fallback is
+    correct and the wizard prompt should stay hidden."""
+    monkeypatch.setattr(hardware, "model", lambda: "Alienware m16 R2")
+    assert keymap.has_user_keymap() is False
+    assert keymap.has_keymap_for_this_machine() is True
+
+
+def test_a_different_model_is_not_mapped_by_the_reference(config_root, monkeypatch):
+    """The reference map would light the wrong keys here, so the wizard prompt
+    is exactly what this user needs."""
+    monkeypatch.setattr(hardware, "model", lambda: "Alienware x17 R2")
+    monkeypatch.setattr(hardware, "slug", lambda text="": "x17-r2" if not text else
+                        ("m16-r2" if "m16" in text else "x17-r2"))
+    assert keymap.has_keymap_for_this_machine() is False
+
+
+def test_a_contributed_keymap_for_this_model_counts(config_root, tmp_path, monkeypatch,
+                                                    shipped_keymap):
+    """Someone else probed this model and it ships with the plugin, so the owner
+    has nothing to do."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    reference = data_dir / "m16r2-keymap.json"
+    reference.write_text(json.dumps(shipped_keymap))
+    monkeypatch.setattr(keymap, "SHIPPED_KEYMAP", str(reference))
+    monkeypatch.setattr(hardware, "model", lambda: "Alienware m15 R3")
+    monkeypatch.setattr(hardware, "keymap_filename",
+                        lambda text="": "alienware-m15-r3-keymap.json")
+    # Faithful: slug("") is this machine, slug(<name>) slugs that name. A mock
+    # returning one value for both made the reference-model check match itself.
+    monkeypatch.setattr(hardware, "slug",
+                        lambda text="": "m15-r3" if not text else
+                        "m16-r2" if "m16" in text.lower() else "m15-r3")
+
+    assert keymap.has_keymap_for_this_machine() is False, "nothing for this model yet"
+    (data_dir / "alienware-m15-r3-keymap.json").write_text(json.dumps(shipped_keymap))
+    assert keymap.has_keymap_for_this_machine() is True
+
+
+def test_an_unreadable_reference_does_not_claim_the_machine_is_mapped(config_root, monkeypatch):
+    monkeypatch.setattr(keymap, "SHIPPED_KEYMAP", "/nonexistent/keymap.json")
+    assert keymap.has_keymap_for_this_machine() is False
+
+
+def test_the_state_payload_reports_it(config_root, monkeypatch):
+    """This is the field the popup reads to decide whether to show the prompt."""
+    from alienfx_ctl import cli
+    monkeypatch.setattr(keymap, "has_keymap_for_this_machine", lambda: True)
+    monkeypatch.setattr(keymap, "has_user_keymap", lambda: False)
+    import io, contextlib
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        cli.cmd_state(type("A", (), {"json": True, "verbose": False})())
+    assert json.loads(out.getvalue())["has_keymap"] is True

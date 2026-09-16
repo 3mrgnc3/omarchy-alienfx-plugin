@@ -155,7 +155,35 @@ def user_keymap_path() -> str:
 
 
 def has_user_keymap() -> bool:
+    """Whether the user has probed a keymap of their own on this machine."""
     return os.path.isfile(model_keymap_path()) or os.path.isfile(legacy_keymap_path())
+
+
+def has_keymap_for_this_machine() -> bool:
+    """Whether a keymap that actually describes *this* model is available.
+
+    Distinct from ``has_user_keymap``, and the difference is what the popup's
+    first-run wizard prompt should turn on. "The user has not probed one
+    themselves" is not the same as "this machine has no map": an owner of the
+    reference model, or of any model someone has contributed a keymap for, is
+    already mapped correctly and has nothing to do.
+
+    Three ways to be mapped, in the order ``load`` prefers them:
+
+    1. the user's own keymap,
+    2. one contributed for this exact model and bundled with the plugin,
+    3. the reference keymap, but only when this machine *is* that model. On
+       anything else it is the wrong map, the keys light in the wrong places,
+       and the wizard is exactly what the user needs.
+    """
+    if has_user_keymap() or os.path.isfile(bundled_keymap_path()):
+        return True
+    try:
+        reference = load_file(SHIPPED_KEYMAP)
+    except (KeymapError, OSError):
+        return False
+    described = str(reference.get("device") or "")
+    return bool(described) and hardware.slug(described) == hardware.slug()
 
 
 def discover_keymaps():

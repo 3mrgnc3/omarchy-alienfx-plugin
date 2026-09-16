@@ -875,8 +875,15 @@ Panel {
         }
 
         // -------------------------------------------------- KeyMap Wizard
-        // Shown only while no user keymap exists; it self-hides once one is
-        // saved, so it is a first-run affordance rather than permanent chrome.
+        // Shown only while this machine has no keymap that describes it: no
+        // probed one, none contributed for this model, and not the model the
+        // bundled reference covers. Note "this machine is mapped", not "the
+        // user probed it themselves" - an owner of a model that is already
+        // covered has nothing to do, and the prompt used to appear anyway
+        // beside a keyboard that was lighting perfectly.
+        //
+        // The small keyboard icon by the title is always available, so
+        // re-running the wizard is never gated on this.
         Button {
           visible: root.loaded && !root.hasKeymap
           width: parent.width
