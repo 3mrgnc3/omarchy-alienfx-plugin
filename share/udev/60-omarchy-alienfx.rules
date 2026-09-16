@@ -1,6 +1,11 @@
 # Omarchy AlienFX plugin - grant the logged-in seat user direct access to the
 # lighting controllers, so nothing in this project ever needs sudo.
 #
+# FALLBACK ONLY. The installer normally generates this file from the hardware
+# actually present, via `alienfx-ctl udev-rule`. The ids below are the reference
+# machine's and grant nothing on a model that uses different ones. If you are
+# reading this in /etc, detection found no controllers when you installed.
+#
 # TAG+="uaccess" makes systemd put an ACL on the device node for whoever is
 # logged into the local seat. Verify with `ls -la /dev/hidraw*`: a trailing "+"
 # on the permission column means the ACL is present.

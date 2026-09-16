@@ -230,7 +230,25 @@ step "Installing the udev rule (needs root once)"
 # The 60- prefix matters: the ACL is applied by the uaccess builtin invoked from
 # 73-seat-late.rules, which only sees tags already set when it runs. A rule
 # numbered above 73 never gets an ACL on the keyboard node.
-if as_root install -Dm644 "$REPO_DIR/share/udev/$UDEV_RULE" "/etc/udev/rules.d/$UDEV_RULE"; then
+#
+# The rule is generated from the hardware actually present, not copied. Product
+# ids differ between Alienware models, and detection matches on vendor id and
+# HID report shape rather than a fixed id - so a rule naming this machine's ids
+# would grant nothing on another one, and the plugin would find the controllers
+# but fail to open them. Generation reads only sysfs, so it works before the
+# rule exists. The bundled rule is the fallback when detection finds nothing.
+RULE_SRC="$REPO_DIR/share/udev/$UDEV_RULE"
+GENERATED_RULE="$(mktemp)"
+trap 'rm -f "$GENERATED_RULE"' EXIT
+if "$BIN_DIR/alienfx-ctl" udev-rule > "$GENERATED_RULE" 2>/dev/null && [[ -s $GENERATED_RULE ]]; then
+  RULE_SRC="$GENERATED_RULE"
+  say "rule generated for the controllers found on this machine"
+else
+  warn "no controllers detected; installing the bundled rule, which may not match"
+  warn "your model. Run 'alienfx-ctl devices' afterwards to check."
+fi
+
+if as_root install -Dm644 "$RULE_SRC" "/etc/udev/rules.d/$UDEV_RULE"; then
   as_root udevadm control --reload-rules || true
   as_root udevadm trigger --subsystem-match=hidraw --action=add || true
   say "rule -> /etc/udev/rules.d/$UDEV_RULE"

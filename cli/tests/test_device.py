@@ -394,3 +394,68 @@ def test_a_missing_controller_explains_what_it_looked_for(monkeypatch):
         device._open_verified(device.KBD)
     message = str(caught.value)
     assert "0d62" in message and "report signature" in message
+
+
+# ------------------------------------------------ the udev rule is generated
+#
+# A static rule can only name the product ids of the machine it was written on.
+# Detection matches on vendor id and report shape, so it recognises a controller
+# whose product id differs - but the rule must then name that id or logind never
+# grants the ACL, and the plugin finds the device and cannot open it. That
+# presents as "the lights do nothing" with no error anywhere.
+
+def _rule(monkeypatch, found):
+    """Run the generator against a fake set of detected controllers."""
+    import io, contextlib
+    from alienfx_ctl import cli
+    monkeypatch.setattr(device, "node_ids", lambda c: found.get(c.key))
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = cli.cmd_udev_rule(None)
+    return code, out.getvalue()
+
+
+def test_the_rule_names_the_ids_actually_present(monkeypatch):
+    """Not the reference machine's. This is the whole point."""
+    code, text = _rule(monkeypatch, {"elc": (0x187C, 0x0550), "kbd": (0x0D62, 0xCABC)})
+    assert code == 0
+    assert 'ATTRS{idVendor}=="187c", ATTRS{idProduct}=="0550"' in text
+    assert 'ATTRS{idVendor}=="0d62", ATTRS{idProduct}=="cabc"' in text
+    assert "0551" not in text and "d2b1" not in text, "leaked the reference ids"
+
+
+def test_every_generated_line_grants_only_uaccess(monkeypatch):
+    """No MODE, no GROUP, no OWNER: the ACL is logind's to hand to the seat
+    user, and widening it would grant more than this plugin needs."""
+    _, text = _rule(monkeypatch, {"elc": (0x187C, 0x0551), "kbd": (0x0D62, 0xD2B1)})
+    rules = [l for l in text.splitlines() if l.startswith("SUBSYSTEM")]
+    assert rules
+    for line in rules:
+        assert line.endswith('TAG+="uaccess"')
+        for widening in ("MODE=", "GROUP=", "OWNER="):
+            assert widening not in line
+
+
+def test_a_machine_with_only_one_controller_still_gets_a_rule(monkeypatch):
+    """Four-zone models have no per-key keyboard at all."""
+    code, text = _rule(monkeypatch, {"elc": (0x187C, 0x0550)})
+    assert code == 0
+    assert text.count('SUBSYSTEM=="hidraw"') == 1
+    assert "0550" in text
+
+
+def test_finding_nothing_fails_rather_than_writing_an_empty_rule(monkeypatch):
+    """The installer falls back to the bundled rule on a non-zero exit. An
+    empty file installed to /etc would look like success and grant nothing."""
+    code, text = _rule(monkeypatch, {})
+    assert code != 0
+    assert 'SUBSYSTEM=="hidraw"' not in text
+
+
+def test_generation_needs_no_access_to_the_device_node():
+    """It runs before the rule exists, so it may only read sysfs - which is
+    world readable - and must never try to open /dev/hidraw*."""
+    import inspect
+    from alienfx_ctl import cli
+    source = inspect.getsource(cli.cmd_udev_rule)
+    assert "open_fds" not in source and "os.open" not in source

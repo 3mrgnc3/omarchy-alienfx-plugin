@@ -184,6 +184,10 @@ NVRAM so they survive a cold boot.
 The udev rule tags both HID nodes with `uaccess`, so logind grants the seat owner an ACL on
 login. The CLI opens them as you.
 
+The rule is generated at install time from the controllers actually present, because
+product ids differ between models and a rule naming one machine's ids grants nothing on
+another. `alienfx-ctl udev-rule` prints it; the installer writes it.
+
 The rule is numbered `60-` on purpose. `uaccess` is applied by a builtin that runs from
 `73-seat-late.rules`, so a rule numbered above that is read too late and the tag is never
 seen.
@@ -232,7 +236,7 @@ to a named key. Reach for it first if a single key behaves oddly.
 manifest.json  Panel.qml  Model.js     the Quickshell plugin
 cli/src/alienfx_ctl/                   the CLI
 cli/src/alienfx_ctl/data/              reference keymap and keyboard shapes
-cli/tests/                             551 tests, no hardware required
+cli/tests/                             556 tests, no hardware required
 share/udev/                            the uaccess rule
 share/systemd/                         restore and resume units
 share/omarchy/hooks/theme-set.d/       the theme-switch hook
@@ -244,7 +248,7 @@ share/bin/                             the wizard's terminal launcher
 Checks run locally. There's no CI and no GitHub Actions.
 
 ```bash
-cd cli && python3 -m pytest tests -q     # 551 tests, no hardware needed
+cd cli && python3 -m pytest tests -q     # 556 tests, no hardware needed
 ```
 
 That covers the protocol buffers, the gradient maths, the wizard, and the packaging checks:
