@@ -157,6 +157,44 @@ refuses outright if it cannot ask, so a script or a stray pipe cannot wipe the i
 silently. Your profiles, keymap and settings are kept unless you add `--purge`.
 
 
+## Updates
+
+Open the popup and the version sits next to the title. It is dim and says nothing most of
+the time. When a newer release has been tagged it takes the theme's accent colour and gains
+a small eye; hover it to see which version, click it to open this page.
+
+That is the whole feature. The plugin never updates itself, downloads no code and installs
+nothing. Updating stays your decision:
+
+```bash
+omarchy plugin update 3mrgnc3.alienfx
+```
+
+which shows you the diff and asks before it applies anything. If you installed the CLI
+separately, re-run `./install.sh` afterwards to refresh it.
+
+**What it does on the network.** When you open the popup it runs `git ls-remote` against the
+repository you cloned from and reads the list of release tags. That is a request for a list
+of names, nothing is downloaded and nothing about you or your machine is sent. The answer is
+kept for a day, so reopening the popup costs nothing, and there is no timer: nothing happens
+while the popup is shut.
+
+It compares tags rather than commits, so you are told about releases and not about
+half-finished work, and a local commit of your own does not make you "behind".
+
+To switch it off entirely, so no request is ever made:
+
+```bash
+touch ~/.config/omarchy-alienfx-plugin/update-check.disabled
+```
+
+The version still shows, it just stops asking. Check by hand at any time:
+
+```bash
+alienfx-ctl update-check
+```
+
+
 ## CLI
 
 Everything the popup does is available by hand, which makes it debuggable without the
@@ -168,12 +206,12 @@ The plugin controls the independent alienfx-ctl tool that can also be used in a 
 ```bash
 ~ ❯ alienfx-ctl -h
 usage: alienfx-ctl [-h] [--version]
-                   {state,set,solid,off,effect,theme,themesync,zonesync,stream,commit,restore,profile,keymap,devices,uninstall,udev-rule} ...
+                   {state,set,solid,off,effect,theme,themesync,zonesync,stream,commit,restore,profile,keymap,devices,uninstall,udev-rule,update-check} ...
 
 Control the RGB lighting zones on a supported Alienware laptop.
 
 positional arguments:
-  {state,set,solid,off,effect,theme,themesync,zonesync,stream,commit,restore,profile,keymap,devices,uninstall,udev-rule}
+  {state,set,solid,off,effect,theme,themesync,zonesync,stream,commit,restore,profile,keymap,devices,uninstall,udev-rule,update-check}
     state               show current state
     set                 change settings and apply (the plugin's entry point)
     solid               set a flat colour
@@ -190,6 +228,7 @@ positional arguments:
     devices             show detected controllers and access
     uninstall           remove the plugin and everything it installed
     udev-rule           print a udev rule for the controllers on this machine
+    update-check        report whether a newer release has been published
 
 options:
   -h, --help            show this help message and exit
@@ -257,7 +296,7 @@ to a named key. Reach for it first if a single key behaves oddly.
 manifest.json  Panel.qml  Model.js     the Quickshell plugin
 cli/src/alienfx_ctl/                   the CLI
 cli/src/alienfx_ctl/data/              reference keymap and keyboard shapes
-cli/tests/                             569 tests, no hardware required
+cli/tests/                             619 tests, no hardware required
 share/udev/                            the uaccess rule
 share/systemd/                         restore and resume units
 share/omarchy/hooks/theme-set.d/       the theme-switch hook
@@ -269,7 +308,7 @@ share/bin/                             the wizard's terminal launcher
 Checks run locally. There's no CI and no GitHub Actions.
 
 ```bash
-cd cli && python3 -m pytest tests -q     # 569 tests, no hardware needed
+cd cli && python3 -m pytest tests -q     # 619 tests, no hardware needed
 ```
 
 That covers the protocol buffers, the gradient maths, the wizard, and the packaging checks:

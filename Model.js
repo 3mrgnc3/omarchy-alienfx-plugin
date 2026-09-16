@@ -16,7 +16,8 @@ var ICON = {
   profile:     "󰉋",
   save:        "󰆓",
   keyboard:    "󰌌",
-  check:       "󰄬"
+  check:       "󰄬",
+  update:      ""
 };
 
 var ZONE_LABELS = {

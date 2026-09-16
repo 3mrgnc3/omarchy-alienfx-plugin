@@ -13,7 +13,8 @@ import os
 import shlex
 import sys
 
-from . import __version__, apiv5, colors, device, engine, gradient, keymap, lock, palette, state
+from . import (__version__, apiv5, colors, device, engine, gradient, keymap, lock,
+               palette, state, update)
 
 
 def _fail(message: str, code: int = 2) -> int:
@@ -607,6 +608,37 @@ def cmd_udev_rule(args) -> int:
     return 0
 
 
+def cmd_update_check(args) -> int:
+    """Report the installed version, and whether a newer release is published.
+
+    Read-only in every sense: it asks the remote for its ref list and updates
+    nothing. The panel calls this with --json when it opens; a person can call
+    it without and get a sentence.
+    """
+    info = update.check(plugin_dir=args.dir or None,
+                        refresh=args.refresh, timeout=args.timeout)
+    if args.json:
+        print(json.dumps(info, sort_keys=True))
+        return 0
+
+    print(f"installed  {info['installed'] or 'unknown'}")
+    if info.get("disabled"):
+        print(f"checking   off ({update.disable_flag()} exists)")
+        return 0
+    if not info.get("ok"):
+        print("latest     could not ask the remote")
+        return 0
+    print(f"latest     {info['latest'] or 'no releases published'}")
+    if info["update"]:
+        print(f"\nVersion {info['latest']} is available.")
+        if info["url"]:
+            print(f"  {info['url']}")
+        print("  Update with: omarchy plugin update 3mrgnc3.alienfx")
+    else:
+        print("\nUp to date.")
+    return 0
+
+
 def cmd_devices(args) -> int:
     """Diagnostics: what we found, and whether we can write to it."""
     print(f"{'node':10s} {'vid:pid':12s} reports                    role")
@@ -870,6 +902,17 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("udev-rule",
                        help="print a udev rule for the controllers on this machine")
     p.set_defaults(func=cmd_udev_rule)
+
+    p = sub.add_parser("update-check",
+                       help="report whether a newer release has been published")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
+    p.add_argument("--dir", default="",
+                   help="the plugin checkout to check (default: the installed one)")
+    p.add_argument("--refresh", action="store_true",
+                   help="ask the remote now rather than using the cached answer")
+    p.add_argument("--timeout", type=float, default=update.TIMEOUT,
+                   help="seconds to wait for the remote (default: %(default)s)")
+    p.set_defaults(func=cmd_update_check)
 
     return parser
 

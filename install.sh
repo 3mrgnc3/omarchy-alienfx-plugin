@@ -222,8 +222,13 @@ disclose() {
   1. The command-line tool that drives the lighting
        $BIN_DIR/alienfx-ctl
        $SHARE_DIR/
-     Python, standard library only. No network access. The popup calls it;
-     you can also use it directly.
+     Python, standard library only. The popup calls it; you can also use
+     it directly.
+     It makes one network request and no other: on opening the popup it
+     asks GitHub for this repository's list of release tags, so it can
+     show you when a newer version exists. It sends nothing about you or
+     your machine, downloads no code, and never installs anything. Off
+     with:  touch $CONFIG_DIR/update-check.disabled
 
   2. A udev rule                                      [needs your password]
        /etc/udev/rules.d/$UDEV_RULE

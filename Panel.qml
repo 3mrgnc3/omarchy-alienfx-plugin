@@ -252,6 +252,37 @@ Panel {
   // both offer to finish the install.
   readonly property bool setupNeeded: resolverDone && (!cliResolved || (loaded && !devicesOk))
 
+  // ------------------------------------------------------------ version tag
+  // Answered by `alienfx-ctl update-check`, which asks the remote for its list
+  // of release tags and downloads nothing. Populated once per open; the CLI
+  // caches the remote half for a day, so reopening the panel costs nothing.
+  //
+  // Purely informational. Nothing here updates anything - the link opens the
+  // repository and the user decides.
+  property var updateInfo: null
+  readonly property string installedVersion: root.updateInfo ? String(root.updateInfo.installed || "") : ""
+  readonly property string latestVersion: root.updateInfo ? String(root.updateInfo.latest || "") : ""
+  readonly property string repoUrl: root.updateInfo ? String(root.updateInfo.url || "") : ""
+  readonly property bool updateAvailable: root.updateInfo ? root.updateInfo.update === true : false
+  readonly property bool updateChecked: root.updateInfo ? root.updateInfo.ok === true : false
+
+  function ingestUpdate(text) {
+    // A malformed reply means no tag rather than a broken panel: this runs on
+    // every open and must never be able to take the bar down with it.
+    try {
+      var parsed = JSON.parse(String(text || ""))
+      root.updateInfo = (parsed && typeof parsed === "object") ? parsed : null
+    } catch (e) {
+      root.updateInfo = null
+    }
+  }
+
+  function openRepo() {
+    // The CLI has already checked this is an https address; an unusable remote
+    // arrives as "" and the tag is simply not clickable.
+    if (root.repoUrl !== "") Quickshell.execDetached(["xdg-open", root.repoUrl])
+  }
+
   // Content colour, not chrome: this is the light being sent to the hardware.
   readonly property color previewColor: Qt.rgba(pickR / 255, pickG / 255, pickB / 255, 1)
 
@@ -551,6 +582,15 @@ Panel {
     onExited: function (code) { if (code !== 0) root.onCliResolved("") }
   }
 
+  // Asks for refs and nothing else, so it never writes into the checkout. That
+  // matters: the shell hot-reloads a plugin whose directory changes, so a
+  // `git fetch` here would restart the panel that started it.
+  Process {
+    id: updateProc
+    command: [root.cliPath, "update-check", "--json", "--dir", root.pluginDir]
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.ingestUpdate(text) }
+  }
+
   Process {
     id: stateProc
     command: [root.cliPath, "state", "--json"]
@@ -687,6 +727,9 @@ Panel {
       cursorIndex = Math.max(0, Model.EFFECT_ORDER.indexOf(root.uiEffect))
       saveOpen = false
       startStream()
+      // Only while the panel is open, never on a timer: nothing reaches the
+      // network while the user is not looking at this.
+      if (root.cliResolved && !updateProc.running) updateProc.running = true
     }
   }
 
@@ -769,14 +812,57 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(2)
 
-            Text {
-              text: "AlienFX"
-              color: root.fg
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.title
-              font.bold: true
-              elide: Text.ElideRight
+            Row {
               width: parent.width
+              spacing: Style.space(7)
+
+              Text {
+                id: heroTitle
+                text: "AlienFX"
+                color: root.fg
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.title
+                font.bold: true
+              }
+
+              // Reference information, not status, so it stays quiet: dimmed
+              // and unremarkable until there is actually something to act on,
+              // at which point it takes the theme accent and grows an eye.
+              // Deliberately not red or amber - nothing is wrong, and a colour
+              // that says "wrong" about a routine release would be a lie the
+              // user has to check every time.
+              Text {
+                id: versionTag
+                visible: root.installedVersion !== ""
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.updateAvailable
+                  ? "v" + root.installedVersion + "  " + Model.ICON.update
+                  : "v" + root.installedVersion
+                color: root.updateAvailable ? Color.accent : Qt.darker(root.fg, 1.9)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                Behavior on color { ColorAnimation { duration: 200 } }
+
+                MouseArea {
+                  id: versionMouse
+                  anchors.fill: parent
+                  // Negative margins: the tag is small, and a target this size
+                  // is otherwise fiddly to hit.
+                  anchors.margins: -Style.space(4)
+                  hoverEnabled: true
+                  cursorShape: root.updateAvailable && root.repoUrl !== ""
+                    ? Qt.PointingHandCursor : Qt.ArrowCursor
+                  onClicked: if (root.updateAvailable) root.openRepo()
+                }
+
+                PanelToolTip {
+                  visible: versionMouse.containsMouse && text !== ""
+                  text: root.updateAvailable
+                    ? "Version " + root.latestVersion + " is available. Click to open the repository."
+                    : (root.updateChecked ? "Up to date." : "")
+                  fontFamily: root.fontFamily
+                }
+              }
             }
 
             Text {
