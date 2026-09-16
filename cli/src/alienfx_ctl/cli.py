@@ -503,6 +503,61 @@ def _devices_ready() -> bool:
     return all(entry["writable"] for entry in _devices_report().values())
 
 
+def cmd_uninstall(args) -> int:
+    """Remove the plugin and everything it installed, from the CLI.
+
+    Exists because `omarchy plugin remove` deletes the plugin folder, which is
+    where uninstall.sh lives. Doing it in that order strands the CLI, the udev
+    rule, both user services and the theme hook, with no obvious way left to
+    get rid of them. This works afterwards.
+
+    The installer keeps a copy of the uninstaller beside the package for exactly
+    this case. That copy is run from a temporary file rather than in place:
+    bash reads a script as it goes, and the script deletes the directory it is
+    sitting in.
+
+    Every prompt belongs to the script, so there is one description of what is
+    removed and one confirmation, wherever it is started from.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    # Beside the installed package first, since that copy outlives the plugin
+    # folder. Derived from where this module actually sits rather than a fixed
+    # path, so it is right for a checkout too.
+    package_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates = [
+        os.path.join(package_parent, "uninstall.sh"),
+        os.path.expanduser(
+            "~/.local/share/omarchy-alienfx-plugin/uninstall.sh"),
+        os.path.expanduser(
+            "~/.config/omarchy/plugins/3mrgnc3.alienfx/uninstall.sh"),
+    ]
+    script = next((path for path in candidates if os.path.isfile(path)), None)
+    if script is None:
+        return _fail(
+            "cannot find uninstall.sh. Re-run the installer to restore it, or "
+            "fetch the repository and run ./uninstall.sh from there", 1)
+
+    handle, temporary = tempfile.mkstemp(prefix="alienfx-uninstall-", suffix=".sh")
+    os.close(handle)
+    try:
+        shutil.copy2(script, temporary)
+        os.chmod(temporary, 0o755)
+        command = ["bash", temporary]
+        if getattr(args, "purge", False):
+            command.append("--purge")
+        if getattr(args, "yes", False):
+            command.append("--yes")
+        return subprocess.call(command)
+    finally:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+
+
 def cmd_udev_rule(args) -> int:
     """Emit a udev rule for the controllers found on *this* machine.
 
@@ -803,6 +858,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("devices", help="show detected controllers and access")
     p.set_defaults(func=cmd_devices)
+
+    p = sub.add_parser("uninstall",
+                       help="remove the plugin and everything it installed")
+    p.add_argument("--purge", action="store_true",
+                   help="also delete profiles, keymaps and saved settings")
+    p.add_argument("--yes", action="store_true",
+                   help="do not ask for confirmation")
+    p.set_defaults(func=cmd_uninstall)
 
     p = sub.add_parser("udev-rule",
                        help="print a udev rule for the controllers on this machine")

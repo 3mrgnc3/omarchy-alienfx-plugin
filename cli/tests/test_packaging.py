@@ -171,3 +171,66 @@ def test_the_readme_test_count_is_current():
     claimed = {int(n) for n in re.findall(r"(\d+) tests?, no hardware", _read("README.md"))}
     assert claimed == {int(found.group(1))}, \
         f"README claims {claimed}, actual {found.group(1)}"
+
+
+# ------------------------------------------------- removing from the CLI
+#
+# `omarchy plugin remove` deletes the plugin folder, which is where
+# uninstall.sh lives. Doing it in that order strands the CLI, the udev rule,
+# both user services and the theme hook with no obvious way left to remove
+# them. `alienfx-ctl uninstall` works afterwards.
+
+def test_the_installer_keeps_a_copy_of_the_uninstaller_outside_the_plugin():
+    """The whole point: it has to outlive the folder being deleted."""
+    install = _read("install.sh")
+    assert '"$SHARE_DIR/uninstall.sh"' in install
+
+
+def test_the_cli_runs_the_uninstaller_from_a_copy_not_in_place():
+    """bash reads a script as it goes, and this one deletes the directory it
+    sits in. Running it in place risks it being read out from under itself."""
+    import inspect
+    from alienfx_ctl import cli
+    source = inspect.getsource(cli.cmd_uninstall)
+    assert "mkstemp" in source
+    assert "shutil.copy2" in source
+
+
+def test_the_cli_looks_beside_its_own_package_first():
+    """Derived from where the module actually sits, so it is right for a
+    checkout as well as an install."""
+    import inspect
+    from alienfx_ctl import cli
+    source = inspect.getsource(cli.cmd_uninstall)
+    assert "__file__" in source
+
+
+def test_a_missing_uninstaller_is_explained_rather_than_silently_ignored(monkeypatch, tmp_path):
+    from alienfx_ctl import cli
+    monkeypatch.setattr(os.path, "isfile", lambda p: False)
+    code = cli.cmd_uninstall(type("A", (), {"purge": False, "yes": False})())
+    assert code != 0
+
+
+def test_the_uninstaller_refuses_when_it_cannot_ask():
+    """It used to remove everything silently when run without a terminal, which
+    is how a script or an accidental pipe could wipe the install with no
+    confirmation at all."""
+    script = _read("uninstall.sh")
+    assert "not interactive and --yes was not given" in script
+    assert "nothing was changed" in script
+
+
+def test_the_uninstaller_states_what_it_will_delete_before_asking():
+    script = _read("uninstall.sh")
+    for expected in ("This will REMOVE", "Are you sure",
+                     "needs your password", "The lights are turned off"):
+        assert expected in script, expected
+
+
+def test_the_uninstaller_is_explicit_about_user_data_either_way():
+    """Losing a probed keymap costs the user several minutes to redo, so both
+    the keep and the delete path say so plainly."""
+    script = _read("uninstall.sh")
+    assert "ALSO DELETED, because you passed --purge" in script
+    assert "KEPT:" in script

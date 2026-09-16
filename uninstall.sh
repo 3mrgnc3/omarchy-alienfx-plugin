@@ -52,13 +52,71 @@ as_root() {
   fi
 }
 
+# Everything that is about to be deleted, before any of it is. Removal is not
+# reversible and some of it needs root, so the user is told exactly what goes
+# and is given a plain way out.
+cat <<INFO
+
+  ==> This will REMOVE the AlienFX plugin from this computer
+
+  Deleted:
+
+  1. The command-line tool and its package
+       $BIN_DIR/alienfx-ctl
+       $BIN_DIR/omarchy-alienfx-wizard
+       $SHARE_DIR/
+
+  2. The udev rule                                    [needs your password]
+       $UDEV_RULE
+     Your user loses direct access to the lighting controllers again.
+
+  3. Both user services
+       $UNIT_DIR/omarchy-alienfx-restore.service
+       $UNIT_DIR/omarchy-alienfx-resume.service
+     Stopped and disabled first, so nothing tries to run them afterwards.
+
+  4. The theme hook
+       $HOOK
+
+  5. The plugin folder itself
+       $PLUGIN_DIR
+
+  The lights are turned off before anything is removed.
+
+INFO
+
+if (( PURGE )); then
+  cat <<INFO
+  ALSO DELETED, because you passed --purge:
+
+       $CONFIG_DIR/
+     Your saved profiles, your keymap and your current settings. If you have
+     mapped a keyboard the wizard cannot recover it, and mapping it again
+     takes a few minutes. Leave off --purge to keep this folder.
+
+INFO
+else
+  cat <<INFO
+  KEPT:
+       $CONFIG_DIR/
+     Your profiles, keymap and settings. Re-installing picks them up again.
+     Pass --purge to delete these as well.
+
+INFO
+fi
+
 if (( ! ASSUME_YES )) && [[ -t 0 ]]; then
   if have gum; then
-    gum confirm "Remove the AlienFX plugin?" || { say "aborted"; exit 1; }
+    gum confirm "Are you sure? This removes everything listed above." \
+      || { say "aborted - nothing was changed"; exit 1; }
   else
-    read -r -p "  Remove the AlienFX plugin? [y/N] " reply
-    [[ ${reply,,} == y || ${reply,,} == yes ]] || { say "aborted"; exit 1; }
+    read -r -p "  Are you sure? This removes everything listed above. [y/N] " reply
+    [[ ${reply,,} == y || ${reply,,} == yes ]] \
+      || { say "aborted - nothing was changed"; exit 1; }
   fi
+elif (( ! ASSUME_YES )); then
+  say "not interactive and --yes was not given; nothing was changed"
+  exit 1
 fi
 
 # Resolve a CLI to turn the lights off with, wherever it happens to live.

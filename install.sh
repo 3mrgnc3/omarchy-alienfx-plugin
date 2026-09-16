@@ -266,6 +266,13 @@ rm -rf "$SHARE_DIR/alienfx_ctl"
 cp -a "$REPO_DIR/cli/src/alienfx_ctl" "$SHARE_DIR/alienfx_ctl"
 say "package -> $SHARE_DIR/alienfx_ctl"
 
+# Keep a copy of the uninstaller outside the plugin folder. `omarchy plugin
+# remove` deletes that folder, taking the only copy with it and stranding
+# everything installed here: the CLI, the rule, the units and the hook, with no
+# obvious way left to remove them. `alienfx-ctl uninstall` runs this copy.
+install -Dm755 "$REPO_DIR/uninstall.sh" "$SHARE_DIR/uninstall.sh"
+say "uninstaller -> $SHARE_DIR/uninstall.sh"
+
 cat > "$BIN_DIR/alienfx-ctl" <<LAUNCHER
 #!/usr/bin/env python3
 """Launcher for alienfx-ctl (written by install.sh)."""

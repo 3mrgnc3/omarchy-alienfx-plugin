@@ -135,8 +135,26 @@ Missing packages are installed with `omarchy pkg add`, falling back to `pacman`.
 omarchy plugin remove 3mrgnc3.alienfx
 ```
 
-Run `uninstall.sh` first. `omarchy plugin remove` deletes the plugin folder, which is all
-Omarchy knows about, and the script lives in it.
+Either order works, but there is a catch worth knowing.
+
+`omarchy plugin remove` deletes the plugin folder, and `uninstall.sh` lives in it. Run that
+command on its own and the CLI, the udev rule, both user services and the theme hook are
+left behind with the script that removes them gone.
+
+If that has already happened, this still works:
+
+```bash
+alienfx-ctl uninstall
+```
+
+The installer keeps a copy of the uninstaller beside the CLI for exactly this case, so the
+command works whether or not the plugin folder is still there, and removes itself along with
+everything else.
+
+However it is started, it lists every file it will delete, says which step needs your
+password, and asks you to confirm before touching anything. Answering no changes nothing. It
+refuses outright if it cannot ask, so a script or a stray pipe cannot wipe the install
+silently. Your profiles, keymap and settings are kept unless you add `--purge`.
 
 
 ## CLI
@@ -236,7 +254,7 @@ to a named key. Reach for it first if a single key behaves oddly.
 manifest.json  Panel.qml  Model.js     the Quickshell plugin
 cli/src/alienfx_ctl/                   the CLI
 cli/src/alienfx_ctl/data/              reference keymap and keyboard shapes
-cli/tests/                             562 tests, no hardware required
+cli/tests/                             569 tests, no hardware required
 share/udev/                            the uaccess rule
 share/systemd/                         restore and resume units
 share/omarchy/hooks/theme-set.d/       the theme-switch hook
@@ -248,7 +266,7 @@ share/bin/                             the wizard's terminal launcher
 Checks run locally. There's no CI and no GitHub Actions.
 
 ```bash
-cd cli && python3 -m pytest tests -q     # 562 tests, no hardware needed
+cd cli && python3 -m pytest tests -q     # 569 tests, no hardware needed
 ```
 
 That covers the protocol buffers, the gradient maths, the wizard, and the packaging checks:
