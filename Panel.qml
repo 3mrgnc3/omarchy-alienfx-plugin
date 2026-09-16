@@ -277,10 +277,30 @@ Panel {
     }
   }
 
+  // Raised by clicking the version tag, answered by the dialog over the panel.
+  property bool updatePromptOpen: false
+
   function openRepo() {
     // The CLI has already checked this is an https address; an unusable remote
     // arrives as "" and the tag is simply not clickable.
     if (root.repoUrl !== "") Quickshell.execDetached(["xdg-open", root.repoUrl])
+  }
+
+  function runUpdate() {
+    root.updatePromptOpen = false
+    // A terminal, not a tracked Process, for two independent reasons. The
+    // update shows a diff and asks, which needs somewhere to ask. And the shell
+    // hot-reloads a plugin whose checkout changes, so a process owned by this
+    // panel would be destroyed by the very merge it started - which is why
+    // `alienfx-ctl update` runs the script from a copy outside the folder.
+    //
+    // Single tokens only: Omarchy's terminal helpers build their command as
+    // "$@" and then eval it, which splits any multi-word argument apart.
+    Quickshell.execDetached([
+      "omarchy-launch-or-focus-tui", "--app-id=alienfx-update",
+      root.cliPath, "update", "--hold"
+    ])
+    root.close()
   }
 
   // Content colour, not chrome: this is the light being sent to the hardware.
@@ -718,8 +738,10 @@ Panel {
     }
     if (opened) {
       // A choice left unconfirmed from a previous session is not worth
-      // re-asserting into a panel the user has just reopened.
+      // re-asserting into a panel the user has just reopened. The same goes
+      // for a question the user walked away from rather than answering.
       root.pending = ({})
+      root.updatePromptOpen = false
       root.readSeq = -1
       // Re-resolve on open: setup may have completed since the last look.
       resolveCli()
@@ -766,9 +788,18 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      onCloseRequested: root.close()
+      // While the prompt is up it owns the keyboard, or Escape would close the
+      // whole panel out from under a question the user has not answered.
+      onCloseRequested: {
+        if (root.updatePromptOpen) root.updatePromptOpen = false
+        else root.close()
+      }
       onTabRequested: function (direction) { root.switchPanel(direction) }
       onMoveRequested: function (dx, dy) {
+        if (root.updatePromptOpen) {
+          if (dx !== 0) updateConfirm.selectedIndex = updateConfirm.selectedIndex === 0 ? 1 : 0
+          return
+        }
         // Vertical steps brightness, horizontal walks the effect row - the two
         // things worth reaching without the mouse.
         if (dy !== 0) {
@@ -778,7 +809,14 @@ Panel {
         }
         if (dx !== 0) root.moveCursor(dx)
       }
-      onActivateRequested: root.activateCursor()
+      onActivateRequested: {
+        if (root.updatePromptOpen) {
+          if (updateConfirm.selectedIndex === 0) root.updatePromptOpen = false
+          else root.runUpdate()
+          return
+        }
+        root.activateCursor()
+      }
 
       Column {
         id: column
@@ -826,22 +864,68 @@ Panel {
               }
 
               // Reference information, not status, so it stays quiet: dimmed
-              // and unremarkable until there is actually something to act on,
-              // at which point it takes the theme accent and grows an eye.
+              // and unremarkable until there is actually something to act on.
               // Deliberately not red or amber - nothing is wrong, and a colour
               // that says "wrong" about a routine release would be a lie the
               // user has to check every time.
-              Text {
+              Item {
                 id: versionTag
                 visible: root.installedVersion !== ""
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.updateAvailable
-                  ? "v" + root.installedVersion + "  " + Model.ICON.update
-                  : "v" + root.installedVersion
-                color: root.updateAvailable ? Color.accent : Qt.darker(root.fg, 1.9)
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                Behavior on color { ColorAnimation { duration: 200 } }
+                implicitWidth: versionRow.implicitWidth
+                implicitHeight: versionRow.implicitHeight
+
+                Row {
+                  id: versionRow
+                  spacing: Style.space(4)
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "v" + root.installedVersion
+                    color: root.updateAvailable ? Color.accent : Qt.darker(root.fg, 1.9)
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    Behavior on color { ColorAnimation { duration: 200 } }
+                  }
+
+                  // A slow pulse rather than a static badge. At this size a
+                  // colour change alone is easy to walk past, and movement
+                  // reads as "there is something here" without the alarm that
+                  // a red dot would carry. The halo sits behind the glyph and
+                  // breathes; the glyph itself stays steady, so the tag never
+                  // becomes hard to read.
+                  Item {
+                    id: updateDot
+                    visible: root.updateAvailable
+                    anchors.verticalCenter: parent.verticalCenter
+                    implicitWidth: updateGlyph.implicitWidth
+                    implicitHeight: updateGlyph.implicitHeight
+
+                    Rectangle {
+                      anchors.centerIn: updateGlyph
+                      width: updateGlyph.implicitHeight * 1.7
+                      height: width
+                      radius: width / 2
+                      color: Color.accent
+                      opacity: 0
+
+                      SequentialAnimation on opacity {
+                        running: updateDot.visible
+                        loops: Animation.Infinite
+                        NumberAnimation { from: 0; to: 0.30; duration: 1300; easing.type: Easing.InOutSine }
+                        NumberAnimation { from: 0.30; to: 0; duration: 1300; easing.type: Easing.InOutSine }
+                      }
+                    }
+
+                    Text {
+                      id: updateGlyph
+                      text: Model.ICON.update
+                      color: Color.accent
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption + Style.space(2)
+                    }
+                  }
+                }
 
                 MouseArea {
                   id: versionMouse
@@ -850,38 +934,18 @@ Panel {
                   // is otherwise fiddly to hit.
                   anchors.margins: -Style.space(4)
                   hoverEnabled: true
-                  cursorShape: root.updateAvailable && root.repoUrl !== ""
-                    ? Qt.PointingHandCursor : Qt.ArrowCursor
-                  onClicked: if (root.updateAvailable) root.openRepo()
+                  cursorShape: root.updateAvailable ? Qt.PointingHandCursor : Qt.ArrowCursor
+                  onClicked: if (root.updateAvailable) root.updatePromptOpen = true
                 }
 
                 PanelToolTip {
                   visible: versionMouse.containsMouse && text !== ""
                   text: root.updateAvailable
-                    ? "Version " + root.latestVersion + " is available. Click to open the repository."
+                    ? "Version " + root.latestVersion + " is available. Click to update."
                     : (root.updateChecked ? "Up to date." : "")
                   fontFamily: root.fontFamily
                 }
               }
-            }
-
-            Text {
-              id: heroStatus
-              text: {
-                if (root.setupNeeded) return root.cliResolved ? "NO DEVICE ACCESS" : "SETUP REQUIRED"
-                if (root.errorText !== "") return "ERROR"
-                if (!root.loaded) return "READING..."
-                if (root.themesync) return "THEMESYNC - " + (root.themeName || "theme").toUpperCase()
-                return (Model.EFFECT_LABELS[root.effect] || root.effect).toUpperCase()
-                  + (root.zonesync ? " - ALL ZONES" : " - " + (Model.ZONE_LABELS[root.selectedZone] || "").toUpperCase())
-              }
-              color: Qt.darker(root.fg, 1.4)
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
-              font.letterSpacing: 1.1
-              elide: Text.ElideRight
-              width: parent.width
             }
           }
 
@@ -1428,6 +1492,28 @@ Panel {
         }
       }
     }
+
+    // Shared component, so this looks and behaves like every other confirmation
+    // in Omarchy rather than a dialog invented here. The update itself happens
+    // in a terminal where the diff can be shown; this only asks whether to go
+    // and do it.
+    ConfirmDialog {
+      id: updateConfirm
+      anchors.fill: parent
+      z: 20
+      opened: root.updatePromptOpen
+      message: "Version " + root.latestVersion + " is available.\n\n"
+        + "This opens a terminal, shows you exactly what changed, and asks "
+        + "again before applying anything. Your settings, profiles and keymaps "
+        + "are not touched."
+      cancelText: "Not now"
+      confirmText: "Update"
+      foreground: root.fg
+      fontFamily: root.fontFamily
+      onCanceled: root.updatePromptOpen = false
+      onConfirmed: root.runUpdate()
+    }
+
   }
 
   // ------------------------------------------------------------- components

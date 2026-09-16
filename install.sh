@@ -281,6 +281,10 @@ say "package -> $SHARE_DIR/alienfx_ctl"
 # everything installed here: the CLI, the rule, the units and the hook, with no
 # obvious way left to remove them. `alienfx-ctl uninstall` runs this copy.
 install -Dm755 "$REPO_DIR/uninstall.sh" "$SHARE_DIR/uninstall.sh"
+# Same reason as the uninstaller: both scripts rewrite the folder they live
+# in, so `alienfx-ctl` runs them from a copy, and that copy has to survive
+# the plugin folder going away.
+install -Dm755 "$REPO_DIR/update.sh" "$SHARE_DIR/update.sh"
 say "uninstaller -> $SHARE_DIR/uninstall.sh"
 
 cat > "$BIN_DIR/alienfx-ctl" <<LAUNCHER
@@ -323,7 +327,13 @@ else
   warn "your model. Run 'alienfx-ctl devices' afterwards to check."
 fi
 
-if as_root install -Dm644 "$RULE_SRC" "/etc/udev/rules.d/$UDEV_RULE"; then
+# Re-running this is the normal way to upgrade, and the rule almost never
+# changes between versions - the hardware has not moved. Asking for a password
+# to write a byte-identical file would make every update feel heavier than it
+# is, so compare first and only touch it when it actually differs.
+if [[ -f /etc/udev/rules.d/$UDEV_RULE ]] && cmp -s "$RULE_SRC" "/etc/udev/rules.d/$UDEV_RULE"; then
+  say "rule already correct -> /etc/udev/rules.d/$UDEV_RULE (no password needed)"
+elif as_root install -Dm644 "$RULE_SRC" "/etc/udev/rules.d/$UDEV_RULE"; then
   as_root udevadm control --reload-rules || true
   as_root udevadm trigger --subsystem-match=hidraw --action=add || true
   say "rule -> /etc/udev/rules.d/$UDEV_RULE"

@@ -504,6 +504,46 @@ def _devices_ready() -> bool:
     return all(entry["writable"] for entry in _devices_report().values())
 
 
+def _run_bundled_script(name: str, flags, hint: str) -> int:
+    """Run one of the shipped shell scripts, from a copy outside its own folder.
+
+    Both callers rewrite the directory the script lives in while it is running -
+    uninstall.sh deletes it, update.sh fast-forwards it - and bash reads a
+    script incrementally as it executes rather than loading it whole. Run in
+    place, either one pulls the ground out from under the interpreter partway
+    through, in a way that depends on where the read happened to have got to.
+
+    Looked up beside the installed package first, because that copy outlives the
+    plugin folder, and derived from where this module actually sits rather than
+    from a fixed path, so it is right in a checkout too.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    package_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates = [
+        os.path.join(package_parent, name),
+        os.path.expanduser(f"~/.local/share/omarchy-alienfx-plugin/{name}"),
+        os.path.expanduser(f"~/.config/omarchy/plugins/3mrgnc3.alienfx/{name}"),
+    ]
+    script = next((path for path in candidates if os.path.isfile(path)), None)
+    if script is None:
+        return _fail(f"cannot find {name}. {hint}", 1)
+
+    handle, temporary = tempfile.mkstemp(prefix="alienfx-", suffix=".sh")
+    os.close(handle)
+    try:
+        shutil.copy2(script, temporary)
+        os.chmod(temporary, 0o755)
+        return subprocess.call(["bash", temporary] + list(flags))
+    finally:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+
+
 def cmd_uninstall(args) -> int:
     """Remove the plugin and everything it installed, from the CLI.
 
@@ -512,51 +552,38 @@ def cmd_uninstall(args) -> int:
     rule, both user services and the theme hook, with no obvious way left to
     get rid of them. This works afterwards.
 
-    The installer keeps a copy of the uninstaller beside the package for exactly
-    this case. That copy is run from a temporary file rather than in place:
-    bash reads a script as it goes, and the script deletes the directory it is
-    sitting in.
-
     Every prompt belongs to the script, so there is one description of what is
     removed and one confirmation, wherever it is started from.
     """
-    import shutil
-    import subprocess
-    import tempfile
+    flags = []
+    if getattr(args, "purge", False):
+        flags.append("--purge")
+    if getattr(args, "yes", False):
+        flags.append("--yes")
+    return _run_bundled_script(
+        "uninstall.sh", flags,
+        "Re-run the installer to restore it, or fetch the repository and run "
+        "./uninstall.sh from there")
 
-    # Beside the installed package first, since that copy outlives the plugin
-    # folder. Derived from where this module actually sits rather than a fixed
-    # path, so it is right for a checkout too.
-    package_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    candidates = [
-        os.path.join(package_parent, "uninstall.sh"),
-        os.path.expanduser(
-            "~/.local/share/omarchy-alienfx-plugin/uninstall.sh"),
-        os.path.expanduser(
-            "~/.config/omarchy/plugins/3mrgnc3.alienfx/uninstall.sh"),
-    ]
-    script = next((path for path in candidates if os.path.isfile(path)), None)
-    if script is None:
-        return _fail(
-            "cannot find uninstall.sh. Re-run the installer to restore it, or "
-            "fetch the repository and run ./uninstall.sh from there", 1)
 
-    handle, temporary = tempfile.mkstemp(prefix="alienfx-uninstall-", suffix=".sh")
-    os.close(handle)
-    try:
-        shutil.copy2(script, temporary)
-        os.chmod(temporary, 0o755)
-        command = ["bash", temporary]
-        if getattr(args, "purge", False):
-            command.append("--purge")
-        if getattr(args, "yes", False):
-            command.append("--yes")
-        return subprocess.call(command)
-    finally:
-        try:
-            os.unlink(temporary)
-        except OSError:
-            pass
+def cmd_update(args) -> int:
+    """Update the plugin to the newest release.
+
+    The popup's version tag runs this in a terminal after asking. It needs a
+    terminal rather than a tracked process for two reasons: the update wants to
+    show a diff and ask, and the shell hot-reloads a plugin whose checkout
+    changes - so a process owned by the panel would be destroyed by the merge it
+    just started.
+    """
+    flags = []
+    if getattr(args, "yes", False):
+        flags.append("--yes")
+    if getattr(args, "hold", False):
+        flags.append("--hold")
+    return _run_bundled_script(
+        "update.sh", flags,
+        "Re-run the installer to restore it, or update by hand with "
+        "`omarchy plugin update 3mrgnc3.alienfx`")
 
 
 def cmd_udev_rule(args) -> int:
@@ -902,6 +929,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("udev-rule",
                        help="print a udev rule for the controllers on this machine")
     p.set_defaults(func=cmd_udev_rule)
+
+    p = sub.add_parser("update",
+                       help="update the plugin to the newest release")
+    p.add_argument("--yes", action="store_true",
+                   help="do not ask for confirmation")
+    p.add_argument("--hold", action="store_true",
+                   help="wait for Enter before exiting (for a terminal opened to run this)")
+    p.set_defaults(func=cmd_update)
 
     p = sub.add_parser("update-check",
                        help="report whether a newer release has been published")

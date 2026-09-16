@@ -186,14 +186,24 @@ def test_the_installer_keeps_a_copy_of_the_uninstaller_outside_the_plugin():
     assert '"$SHARE_DIR/uninstall.sh"' in install
 
 
-def test_the_cli_runs_the_uninstaller_from_a_copy_not_in_place():
-    """bash reads a script as it goes, and this one deletes the directory it
-    sits in. Running it in place risks it being read out from under itself."""
+def test_the_cli_runs_a_bundled_script_from_a_copy_not_in_place():
+    """bash reads a script as it goes, and both of these rewrite the directory
+    they sit in: the uninstaller deletes it, the updater fast-forwards it.
+    Running either in place risks it being read out from under itself."""
     import inspect
     from alienfx_ctl import cli
-    source = inspect.getsource(cli.cmd_uninstall)
+    source = inspect.getsource(cli._run_bundled_script)
     assert "mkstemp" in source
     assert "shutil.copy2" in source
+
+
+def test_both_scripts_go_through_that_one_path():
+    """The hazard is identical for both, so there is one implementation of the
+    precaution rather than two that can drift apart."""
+    import inspect
+    from alienfx_ctl import cli
+    for command in (cli.cmd_uninstall, cli.cmd_update):
+        assert "_run_bundled_script" in inspect.getsource(command)
 
 
 def test_the_cli_looks_beside_its_own_package_first():
@@ -201,8 +211,20 @@ def test_the_cli_looks_beside_its_own_package_first():
     checkout as well as an install."""
     import inspect
     from alienfx_ctl import cli
-    source = inspect.getsource(cli.cmd_uninstall)
-    assert "__file__" in source
+    assert "__file__" in inspect.getsource(cli._run_bundled_script)
+
+
+def test_the_installer_ships_the_updater_too():
+    """`alienfx-ctl update` runs it from beside the package, so a copy has to
+    survive the plugin folder being replaced underneath it."""
+    install = _read("install.sh")
+    assert '"$SHARE_DIR/update.sh"' in install
+
+
+def test_a_missing_updater_is_explained_rather_than_silently_ignored(monkeypatch):
+    from alienfx_ctl import cli
+    monkeypatch.setattr(os.path, "isfile", lambda p: False)
+    assert cli.cmd_update(type("A", (), {"yes": False, "hold": False})()) != 0
 
 
 def test_a_missing_uninstaller_is_explained_rather_than_silently_ignored(monkeypatch, tmp_path):
@@ -226,6 +248,54 @@ def test_the_uninstaller_states_what_it_will_delete_before_asking():
     for expected in ("This will REMOVE", "Are you sure",
                      "needs your password", "The lights are turned off"):
         assert expected in script, expected
+
+
+def test_the_updater_refuses_when_it_cannot_ask():
+    """Launched from a terminal the popup opened, so the same rule as the
+    uninstaller: no confirmation available means no changes."""
+    script = _read("update.sh")
+    assert "not interactive and --yes was not given" in script
+    assert "nothing changed" in script
+
+
+def test_the_updater_says_what_it_will_do_before_asking():
+    script = _read("update.sh")
+    for expected in ("omarchy plugin update", "install.sh",
+                     "Update now?", "not touched"):
+        assert expected in script, expected
+
+
+def test_the_updater_refreshes_the_parts_outside_the_plugin_folder():
+    """`omarchy plugin update` only knows about the plugin folder. Stopping
+    there leaves new QML calling an old CLI, which is a worse state than not
+    updating: the popup would call a command that does not exist yet."""
+    script = _read("update.sh")
+    assert "$PLUGIN_DIR/install.sh" in script
+    assert "--no-deps" in script
+
+
+def test_the_updater_declines_a_checkout_it_cannot_fast_forward():
+    """A dirty or hand-copied plugin folder cannot be merged. Saying why beats
+    a git error the user has no context for."""
+    script = _read("update.sh")
+    assert "is not a git checkout" in script
+    assert "local changes" in script
+
+
+def test_the_updater_does_not_refresh_when_nothing_moved():
+    """Declining the diff, or already being current, must not trigger a
+    reinstall - which would ask for a password for no reason."""
+    script = _read("update.sh")
+    assert 'BEFORE == "$AFTER"' in script
+
+
+def test_the_installer_leaves_an_unchanged_udev_rule_alone():
+    """Re-running the installer is how an update refreshes the CLI. The rule
+    almost never changes, and asking for a password to write a byte-identical
+    file would make every update feel heavier than it is."""
+    install = _read("install.sh")
+    assert "cmp -s" in install
+    assert "no password needed" in install
 
 
 def test_the_uninstaller_is_explicit_about_user_data_either_way():
