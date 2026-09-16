@@ -55,7 +55,7 @@ the next owner of that machine gets it for free.
 omarchy plugin add https://github.com/3mrgnc3/omarchy-alienfx-plugin.git --enable
 ```
 
-This installs only the QML, so on first run a popup will offer **Complete setup** on first click. This installs the udev rule, the CLI tool and the systemd units that live outside the plugin folder. The Complete setup process opens a terminal, checks dependencies, tells you what's missing and asks before changing
+This installs only the QML, so on first run a popup will offer **Complete setup** on first click. Before touching anything, the installer lists every component it will add, where each one goes, and which single step needs your password, then asks whether to continue. Declining changes nothing. This installs the udev rule, the CLI tool and the systemd units that live outside the plugin folder. The Complete setup process opens a terminal, checks dependencies, tells you what's missing and asks before changing
 anything. The udev step needs your password once. This project codebase is small, and users can quickly and easily verify it before install. 
 
 

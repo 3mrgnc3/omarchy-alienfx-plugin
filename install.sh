@@ -199,6 +199,64 @@ preflight() {
   fi
 }
 
+# ----------------------------------------------------------------- disclosure
+#
+# Everything this script will do, before it does any of it. The user is about to
+# be asked for a root password, so they are entitled to know exactly what for,
+# what lands where, and what keeps running afterwards. Declining here changes
+# nothing: `omarchy plugin add` installs only the QML, and the plugin sits inert
+# until this script has run.
+disclose() {
+  cat <<INFO
+
+  ==> What this will install
+
+  This adds four things outside the plugin folder. Nothing runs as root
+  afterwards, and there is no background daemon.
+
+  1. The command-line tool that drives the lighting
+       $BIN_DIR/alienfx-ctl
+       $SHARE_DIR/
+     Python, standard library only. No network access. The popup calls it;
+     you can also use it directly.
+
+  2. A udev rule                                      [needs your password]
+       /etc/udev/rules.d/$UDEV_RULE
+     Lighting lives on two USB HID devices that are root-only by default.
+     The rule is generated from the controllers found on THIS machine and
+     tags exactly those two with "uaccess", which asks systemd to grant an
+     ACL to whoever is logged in at this computer. It sets no permissions,
+     adds no group, and grants nothing to remote users. This is the only
+     step needing root, and it is the only reason for the password prompt.
+     See exactly what would be written, before agreeing:
+       $REPO_DIR/cli/bin/alienfx-ctl udev-rule
+
+  3. Two user services (not system services)
+       $UNIT_DIR/omarchy-alienfx-restore.service
+       $UNIT_DIR/omarchy-alienfx-resume.service
+     Each only re-applies your saved lighting, at login and after sleep.
+
+  4. A theme hook
+       $HOOK_DIR/50-omarchy-alienfx
+     Repaints the lighting when you switch Omarchy themes.
+
+  Your settings, profiles and keymaps are kept in
+       $CONFIG_DIR/
+
+  Missing dependencies are listed next and you will be asked before any
+  package is installed.
+
+  To undo all of it:  ./uninstall.sh   (then: omarchy plugin remove $PLUGIN_ID)
+
+INFO
+}
+
+disclose
+if ! ask "Install these components now?"; then
+  say "nothing was changed"
+  exit 0
+fi
+
 preflight
 
 # ------------------------------------------------------------------- install
