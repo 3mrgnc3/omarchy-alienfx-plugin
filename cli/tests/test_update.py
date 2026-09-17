@@ -194,14 +194,32 @@ def test_an_unreachable_remote_is_distinct_from_one_with_no_releases(checkout, m
 
 
 def test_the_check_only_ever_asks_for_refs(checkout, remote, config_root):
-    """It must never fetch. A fetch writes into .git, and the shell hot-reloads
-    a plugin whose checkout changes - so it would restart the panel that
-    started it."""
+    """Two reasons, and the second is why the marketplace rejected the earlier
+    design. A fetch writes into .git, and the shell hot-reloads a plugin whose
+    checkout changes, so it would restart the panel that started it. And
+    obtaining code this way at all, then running it, is a listing blocker: the
+    version named to the user is not bound to the commit that would arrive."""
     update.check(checkout, refresh=True)
     verbs = [call[0] for call in remote["calls"]]
     assert set(verbs) == {"ls-remote", "remote"}
-    assert not any("fetch" in call for call in remote["calls"])
-    assert not any("pull" in call for call in remote["calls"])
+    for forbidden in ("fetch", "pull", "checkout", "merge", "reset", "clone"):
+        assert not any(forbidden in call for call in remote["calls"]), forbidden
+
+
+def test_the_check_reports_the_cli_its_own_version(checkout, remote, config_root):
+    """Not the same as the installed version: the plugin folder and the CLI are
+    updated by separate steps and can disagree. The panel compares the two to
+    notice that the popup is newer than the command it calls."""
+    from alienfx_ctl import __version__
+    assert update.check(checkout, refresh=True)["cli"] == __version__
+    assert update.check(checkout)["cli"] == __version__
+
+
+def test_the_cli_version_is_reported_even_with_checking_off(checkout, remote, config_root):
+    """Turning off the network check must not cost the panel its ability to
+    notice a half-finished update, which is a purely local comparison."""
+    open(update.disable_flag(), "w").close()
+    assert update.check(checkout)["cli"] != ""
 
 
 def test_git_is_told_never_to_prompt(checkout, monkeypatch):

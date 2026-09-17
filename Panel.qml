@@ -250,7 +250,8 @@ Panel {
   // the outside: there is no CLI at all, or there is one but the udev rule was
   // never installed so every write is denied. Both leave the lights dead, so
   // both offer to finish the install.
-  readonly property bool setupNeeded: resolverDone && (!cliResolved || (loaded && !devicesOk))
+  readonly property bool setupNeeded: resolverDone
+    && (!cliResolved || (loaded && !devicesOk) || cliOutdated)
 
   // ------------------------------------------------------------ version tag
   // Answered by `alienfx-ctl update-check`, which asks the remote for its list
@@ -262,9 +263,17 @@ Panel {
   property var updateInfo: null
   readonly property string installedVersion: root.updateInfo ? String(root.updateInfo.installed || "") : ""
   readonly property string latestVersion: root.updateInfo ? String(root.updateInfo.latest || "") : ""
-  readonly property string repoUrl: root.updateInfo ? String(root.updateInfo.url || "") : ""
   readonly property bool updateAvailable: root.updateInfo ? root.updateInfo.update === true : false
   readonly property bool updateChecked: root.updateInfo ? root.updateInfo.ok === true : false
+
+  // The plugin folder and the CLI are updated by separate steps: `omarchy
+  // plugin update` moves the folder, and only re-running the installer moves
+  // the CLI. Between the two the popup is newer than the command it calls, so
+  // a control can invoke a subcommand that does not exist yet. Both versions
+  // are read locally and reported by the same call the panel already makes.
+  readonly property string cliVersion: root.updateInfo ? String(root.updateInfo.cli || "") : ""
+  readonly property bool cliOutdated: root.installedVersion !== "" && root.cliVersion !== ""
+    && root.installedVersion !== root.cliVersion
 
   function ingestUpdate(text) {
     // A malformed reply means no tag rather than a broken panel: this runs on
@@ -277,30 +286,17 @@ Panel {
     }
   }
 
-  // Raised by clicking the version tag, answered by the dialog over the panel.
-  property bool updatePromptOpen: false
+  // The official marketplace listing, not the repository. Distribution is
+  // managed there, under the Omarchy team's own review: the listing shows the
+  // exact commit that was validated and its verification state, which a
+  // repository page cannot. `plugin` is a supported exact search term, and the
+  // id comes from our own manifest so the link cannot drift from what is
+  // published.
+  readonly property string listingUrl:
+    "https://plugins.omarchy.org/?plugin=" + encodeURIComponent(root.moduleName)
 
-  function openRepo() {
-    // The CLI has already checked this is an https address; an unusable remote
-    // arrives as "" and the tag is simply not clickable.
-    if (root.repoUrl !== "") Quickshell.execDetached(["xdg-open", root.repoUrl])
-  }
-
-  function runUpdate() {
-    root.updatePromptOpen = false
-    // A terminal, not a tracked Process, for two independent reasons. The
-    // update shows a diff and asks, which needs somewhere to ask. And the shell
-    // hot-reloads a plugin whose checkout changes, so a process owned by this
-    // panel would be destroyed by the very merge it started - which is why
-    // `alienfx-ctl update` runs the script from a copy outside the folder.
-    //
-    // Single tokens only: Omarchy's terminal helpers build their command as
-    // "$@" and then eval it, which splits any multi-word argument apart.
-    Quickshell.execDetached([
-      "omarchy-launch-or-focus-tui", "--app-id=alienfx-update",
-      root.cliPath, "update", "--hold"
-    ])
-    root.close()
+  function openListing() {
+    Quickshell.execDetached(["xdg-open", root.listingUrl])
   }
 
   // Content colour, not chrome: this is the light being sent to the hardware.
@@ -738,10 +734,8 @@ Panel {
     }
     if (opened) {
       // A choice left unconfirmed from a previous session is not worth
-      // re-asserting into a panel the user has just reopened. The same goes
-      // for a question the user walked away from rather than answering.
+      // re-asserting into a panel the user has just reopened.
       root.pending = ({})
-      root.updatePromptOpen = false
       root.readSeq = -1
       // Re-resolve on open: setup may have completed since the last look.
       resolveCli()
@@ -790,16 +784,9 @@ Panel {
       anchors.fill: parent
       // While the prompt is up it owns the keyboard, or Escape would close the
       // whole panel out from under a question the user has not answered.
-      onCloseRequested: {
-        if (root.updatePromptOpen) root.updatePromptOpen = false
-        else root.close()
-      }
+      onCloseRequested: root.close()
       onTabRequested: function (direction) { root.switchPanel(direction) }
       onMoveRequested: function (dx, dy) {
-        if (root.updatePromptOpen) {
-          if (dx !== 0) updateConfirm.selectedIndex = updateConfirm.selectedIndex === 0 ? 1 : 0
-          return
-        }
         // Vertical steps brightness, horizontal walks the effect row - the two
         // things worth reaching without the mouse.
         if (dy !== 0) {
@@ -809,14 +796,7 @@ Panel {
         }
         if (dx !== 0) root.moveCursor(dx)
       }
-      onActivateRequested: {
-        if (root.updatePromptOpen) {
-          if (updateConfirm.selectedIndex === 0) root.updatePromptOpen = false
-          else root.runUpdate()
-          return
-        }
-        root.activateCursor()
-      }
+      onActivateRequested: root.activateCursor()
 
       Column {
         id: column
@@ -935,13 +915,13 @@ Panel {
                   anchors.margins: -Style.space(4)
                   hoverEnabled: true
                   cursorShape: root.updateAvailable ? Qt.PointingHandCursor : Qt.ArrowCursor
-                  onClicked: if (root.updateAvailable) root.updatePromptOpen = true
+                  onClicked: if (root.updateAvailable) root.openListing()
                 }
 
                 PanelToolTip {
                   visible: versionMouse.containsMouse && text !== ""
                   text: root.updateAvailable
-                    ? "Version " + root.latestVersion + " is available. Click to update."
+                    ? "Version " + root.latestVersion + " is available. Click to open the marketplace listing."
                     : (root.updateChecked ? "Up to date." : "")
                   fontFamily: root.fontFamily
                 }
@@ -975,7 +955,8 @@ Panel {
 
           Text {
             width: parent.width
-            text: "Setup needs finishing"
+            text: root.cliOutdated && root.cliResolved ? "Update needs finishing"
+                                                        : "Setup needs finishing"
             color: root.fg
             font.family: root.fontFamily
             font.pixelSize: Style.font.subtitle
@@ -984,13 +965,21 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.cliResolved
-              ? "The lighting controllers are not writable yet - the udev rule that grants "
+            text: {
+              if (!root.cliResolved)
+                return "The lighting controller needs a udev rule and a small CLI, which live "
+                  + "outside the plugin folder. This opens a terminal and installs them - "
+                  + "it will check dependencies first and ask before changing anything."
+              if (root.cliOutdated)
+                return "The plugin was updated to " + root.installedVersion + " but the "
+                  + "command it drives is still " + root.cliVersion + ". Those live outside "
+                  + "the plugin folder and are refreshed by the installer already in this "
+                  + "folder. This opens a terminal and runs it, listing what it will change "
+                  + "and asking first."
+              return "The lighting controllers are not writable yet - the udev rule that grants "
                 + "access has not been installed. This opens a terminal and installs it; "
                 + "it needs your password once."
-              : "The lighting controller needs a udev rule and a small CLI, which live "
-                + "outside the plugin folder. This opens a terminal and installs them - "
-                + "it will check dependencies first and ask before changing anything."
+            }
             color: Qt.darker(root.fg, 1.3)
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -1491,27 +1480,6 @@ Panel {
           }
         }
       }
-    }
-
-    // Shared component, so this looks and behaves like every other confirmation
-    // in Omarchy rather than a dialog invented here. The update itself happens
-    // in a terminal where the diff can be shown; this only asks whether to go
-    // and do it.
-    ConfirmDialog {
-      id: updateConfirm
-      anchors.fill: parent
-      z: 20
-      opened: root.updatePromptOpen
-      message: "Version " + root.latestVersion + " is available.\n\n"
-        + "This opens a terminal, shows you exactly what changed, and asks "
-        + "again before applying anything. Your settings, profiles and keymaps "
-        + "are not touched."
-      cancelText: "Not now"
-      confirmText: "Update"
-      foreground: root.fg
-      fontFamily: root.fontFamily
-      onCanceled: root.updatePromptOpen = false
-      onConfirmed: root.runUpdate()
     }
 
   }

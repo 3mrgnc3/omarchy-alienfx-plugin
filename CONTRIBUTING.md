@@ -229,16 +229,17 @@ like a colour problem.
 
 **Getting the newest version.** The popup tells you when there is one: the
 version beside the title takes the accent colour and an info mark appears, and
-clicking it asks whether to update. By hand it is the same thing:
+clicking it opens the listing on the official marketplace. Updating is
+Omarchy's own command, not something the plugin does for you:
 
 ```bash
-alienfx-ctl update
+omarchy plugin update 3mrgnc3.alienfx
 ```
 
-That fast-forwards the plugin folder and refreshes the CLI, the user services
-and the theme hook along with it, so the popup can never end up newer than the
-command it calls. Working from your own clone instead, re-run `./install.sh`
-after pulling.
+That moves the plugin folder only. The popup will then say **Update needs
+finishing**, because the CLI lives outside that folder; clicking it runs the
+installer already in the folder. Working from your own clone instead, re-run
+`./install.sh` after pulling.
 
 **Removing it again** when you are done testing:
 

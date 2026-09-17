@@ -281,10 +281,6 @@ say "package -> $SHARE_DIR/alienfx_ctl"
 # everything installed here: the CLI, the rule, the units and the hook, with no
 # obvious way left to remove them. `alienfx-ctl uninstall` runs this copy.
 install -Dm755 "$REPO_DIR/uninstall.sh" "$SHARE_DIR/uninstall.sh"
-# Same reason as the uninstaller: both scripts rewrite the folder they live
-# in, so `alienfx-ctl` runs them from a copy, and that copy has to survive
-# the plugin folder going away.
-install -Dm755 "$REPO_DIR/update.sh" "$SHARE_DIR/update.sh"
 say "uninstaller -> $SHARE_DIR/uninstall.sh"
 
 cat > "$BIN_DIR/alienfx-ctl" <<LAUNCHER

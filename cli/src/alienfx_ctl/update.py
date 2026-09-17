@@ -35,7 +35,7 @@ import subprocess
 import time
 import urllib.parse
 
-from . import state
+from . import __version__, state
 
 #: Where `omarchy plugin add` puts us. Only a default: the panel knows the
 #: directory it was actually loaded from and passes it, which is authoritative
@@ -239,14 +239,22 @@ def check(plugin_dir=None, refresh: bool = False, timeout: float = TIMEOUT) -> d
     Never raises and never fails: an unreachable remote, a directory that is
     not a checkout, or a manifest without a version all degrade to "no opinion
     about updates", which the panel renders as the version on its own.
+
+    `cli` is this package's own version, which is not the same thing as
+    `installed`: the plugin folder and the CLI are updated by separate steps, so
+    they can disagree. When they do, the popup is newer than the command it
+    calls and the panel says setup needs finishing rather than calling a
+    subcommand that does not exist yet. Reported here because the panel already
+    runs this on open, so it costs no extra process.
     """
     plugin_dir = os.path.abspath(plugin_dir or default_plugin_dir())
     now = time.time()
     local = installed_version(plugin_dir)
 
     if disabled():
-        return {"installed": local, "latest": "", "update": False,
-                "url": "", "checked": 0, "ok": False, "disabled": True}
+        return {"installed": local, "cli": __version__, "latest": "",
+                "update": False, "url": "", "checked": 0, "ok": False,
+                "disabled": True}
 
     cached = state.read_json(cache_path())
     if not refresh and _fresh(cached, plugin_dir, now):
@@ -255,6 +263,7 @@ def check(plugin_dir=None, refresh: bool = False, timeout: float = TIMEOUT) -> d
         # already current would be the most annoying possible bug here.
         result = dict(cached)
         result["installed"] = local
+        result["cli"] = __version__
         result["update"] = _is_newer(local, result.get("latest"))
         result.pop("dir", None)
         return result
@@ -274,6 +283,7 @@ def check(plugin_dir=None, refresh: bool = False, timeout: float = TIMEOUT) -> d
     result = dict(record)
     result.pop("dir", None)
     result["installed"] = local
+    result["cli"] = __version__
     result["update"] = _is_newer(local, latest)
     return result
 
