@@ -49,3 +49,30 @@ def stable_theme_anchors(monkeypatch):
     """
     from alienfx_ctl import palette
     monkeypatch.setattr(palette, "anchors", lambda: MEASURED_ANCHORS)
+
+
+#: The keymap suite exercises `load()`'s precedence rules itself, so it has to see
+#: the real thing; the same for the hardware tests that save a map.
+_REAL_KEYMAP_MODULES = {"test_keymap.py", "test_hardware.py"}
+
+
+@pytest.fixture(autouse=True)
+def reference_keymap(monkeypatch, request):
+    """Pin what `keymap.load()` returns for everything outside the keymap suite.
+
+    `load()` prefers the user's own map, then one contributed for this exact
+    model, then the reference. The first two depend on the machine the suite is
+    running on, so the moment a keymap is contributed for model X, the zone-name
+    and index assumptions in the apply and gradient suites fail on model X
+    machines while still passing on the machine the suite was written on - and a
+    contributor only finds out after their map is already in the tree.
+
+    Pinning here leaves the load path itself under test in `test_keymap.py`
+    while making what the planner sees deterministic for everyone else.
+    """
+    if os.path.basename(str(request.node.fspath)) in _REAL_KEYMAP_MODULES:
+        return
+    from alienfx_ctl import keymap
+    reference = keymap.load_file(keymap.SHIPPED_KEYMAP)
+    monkeypatch.setattr(keymap, "load", lambda: reference)
+
