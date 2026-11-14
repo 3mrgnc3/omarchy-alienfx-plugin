@@ -27,6 +27,7 @@ ELC_PACKET_DELAY = 0.005
 
 _OP_CONTROL = 0x21
 _OP_SET_ONE_COLOR = 0x27
+_OP_SET_DIM = 0x26
 
 _SUB_START = 0x01
 _SUB_SAVE = 0x02
@@ -76,11 +77,34 @@ def set_one_color(fd: int, rgb, zone_ids) -> None:
     elc_send(fd, [0x03, _OP_SET_ONE_COLOR, red, green, blue, 0x00, len(ids), *ids])
 
 
+def set_dim(fd: int, level: int, zone_ids) -> None:
+    """Set the per-zone dim amount. 0 is full colour, 100 is black.
+
+    ``0x26`` carries a *darkening* amount, not a brightness: OpenRGB's mode
+    tables encode it as ``brightness_min = 100, brightness_max = 0``.  The
+    controller keeps this per zone and keeps it across colour writes, so a zone
+    left at 100 by AWCC stays black no matter what colour we send, and nothing
+    in this plugin ever used to clear it.
+    """
+    ids = list(zone_ids)
+    if not ids:
+        return
+    level = max(0, min(100, int(level)))
+    count = len(ids)
+    elc_send(fd, [0x03, _OP_SET_DIM, level, (count >> 8) & 0xFF, count & 0xFF, *ids])
+
+
+def undim(fd: int, zone_ids) -> None:
+    """Clear any dim left on these zones so a colour write is actually visible."""
+    set_dim(fd, 0, zone_ids)
+
+
 def solid(fd: int, rgb, zone_ids) -> None:
     """Apply a flat colour immediately."""
     ids = list(zone_ids)
     if not ids:
         return
+    undim(fd, ids)
     _control(fd, _SUB_START)
     set_one_color(fd, rgb, ids)
     _control(fd, _SUB_PLAY)
@@ -105,6 +129,7 @@ def persist(fd: int, zone_colors) -> None:
         return
     _control(fd, _SUB_REMOVE, CID_DEFAULT)
     _control(fd, _SUB_START, CID_DEFAULT)
+    undim(fd, [i for _, ids in items for i in ids])
     for rgb, ids in items:
         set_one_color(fd, rgb, ids)
     _control(fd, _SUB_SAVE, CID_DEFAULT)

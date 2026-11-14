@@ -253,6 +253,12 @@ def apply(st, zones=None, persist: bool = False, fast: bool = False) -> dict:
                 continue
             grouped.setdefault(tuple(rgb), []).extend(ids)
         apiv4.begin(elc_fd)
+        # Clear any dim before painting. The controller keeps a per-zone dim
+        # amount (0 = full colour, 100 = black) across colour writes, and
+        # nothing in this plugin used to reset it, so a zone AWCC left dimmed
+        # silently swallowed every colour we sent - that is what kept the lid
+        # alien head dark for months.
+        apiv4.undim(elc_fd, [i for ids in grouped.values() for i in ids])
         for rgb, ids in grouped.items():
             apiv4.set_one_color(elc_fd, rgb, ids)
         apiv4.commit(elc_fd)

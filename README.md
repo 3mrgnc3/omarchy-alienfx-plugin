@@ -299,7 +299,7 @@ to a named key. Reach for it first if a single key behaves oddly.
 manifest.json  Panel.qml  Model.js     the Quickshell plugin
 cli/src/alienfx_ctl/                   the CLI
 cli/src/alienfx_ctl/data/              reference keymap and keyboard shapes
-cli/tests/                             624 tests, no hardware required
+cli/tests/                             627 tests, no hardware required
 share/udev/                            the uaccess rule
 share/systemd/                         restore and resume units
 share/omarchy/hooks/theme-set.d/       the theme-switch hook
@@ -312,7 +312,7 @@ install.sh  uninstall.sh             everything outside the plugin folder
 Checks run locally. There's no CI and no GitHub Actions.
 
 ```bash
-cd cli && python3 -m pytest tests -q     # 624 tests, no hardware needed
+cd cli && python3 -m pytest tests -q     # 627 tests, no hardware needed
 ```
 
 That covers the protocol buffers, the gradient maths, the wizard, and the packaging checks:
