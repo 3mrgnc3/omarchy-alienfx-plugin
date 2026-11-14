@@ -55,14 +55,48 @@ def test_elc_set_one_color_layout(monkeypatch):
     assert buf[:9] == bytes([0x03, 0x27, 0x11, 0x22, 0x33, 0x00, 0x02, 0x00, 0x02])
 
 
-def test_elc_solid_is_wrapped_in_a_control_block(monkeypatch):
-    """Without the start/play wrapper the firmware discards the colour."""
+def test_elc_set_dim_layout(monkeypatch):
+    rec = Recorder(); rec.install(monkeypatch, apiv4)
+    apiv4.set_dim(3, 40, [0x00, 0x02])
+    _req, buf = rec.frames[0]
+    # [0x03, 0x26, level, count hi, count lo, id...]
+    assert buf[:7] == bytes([0x03, 0x26, 40, 0x00, 0x02, 0x00, 0x02])
+    assert buf[7:] == bytes(26), "the tail must be zero-padded"
+
+
+def test_elc_dim_level_is_a_darkening_amount(monkeypatch):
+    """0x26 is a dim amount, not a brightness: 0 is full colour, 100 is black.
+
+    OpenRGB encodes it as brightness_min 100 / brightness_max 0. Sending 100 to
+    "restore brightness" blackens the zone, so pin both ends of the scale.
+    """
+    rec = Recorder(); rec.install(monkeypatch, apiv4)
+    apiv4.undim(3, [0x02])
+    apiv4.set_dim(3, 100, [0x02])
+    assert rec.frames[0][1][2] == 0, "undim must mean no dimming"
+    assert rec.frames[1][1][2] == 100, "100 must mean fully dimmed"
+
+
+def test_elc_set_dim_clamps_out_of_range(monkeypatch):
+    rec = Recorder(); rec.install(monkeypatch, apiv4)
+    apiv4.set_dim(3, -5, [0x00])
+    apiv4.set_dim(3, 999, [0x00])
+    assert [buf[2] for _r, buf in rec.frames] == [0, 100]
+
+
+def test_elc_solid_clears_the_dim_before_the_control_block(monkeypatch):
+    """A zone AWCC left dimmed swallows every colour we send.
+
+    The controller keeps the dim amount per zone across colour writes, so the
+    colour has to be preceded by a dim of 0 or the paint is invisible.
+    """
     rec = Recorder(); rec.install(monkeypatch, apiv4)
     apiv4.solid(3, (255, 0, 0), [0x00])
-    payloads = [buf[:6] for _req, buf in rec.frames]
-    assert payloads[0] == bytes([0x03, 0x21, 0x00, 0x01, 0x00, 0xFF])   # start
-    assert payloads[1][:2] == bytes([0x03, 0x27])                        # colour
-    assert payloads[2] == bytes([0x03, 0x21, 0x00, 0x03, 0x00, 0xFF])   # play
+    payloads = [buf[:7] for _req, buf in rec.frames]
+    assert payloads[0] == bytes([0x03, 0x26, 0x00, 0x00, 0x01, 0x00, 0x00])  # undim
+    assert payloads[1] == bytes([0x03, 0x21, 0x00, 0x01, 0x00, 0xFF, 0x00])   # start
+    assert payloads[2][:2] == bytes([0x03, 0x27])                             # colour
+    assert payloads[3] == bytes([0x03, 0x21, 0x00, 0x03, 0x00, 0xFF, 0x00])   # play
 
 
 def test_elc_off_sends_black(monkeypatch):
